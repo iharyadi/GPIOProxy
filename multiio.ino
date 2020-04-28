@@ -4,7 +4,6 @@
 #include <TaskSchedulerDeclarations.h>
 #include <TaskSchedulerSleepMethods.h>
 
-#include <EEPROMWearLevel.h>
 #include <slip.h>
 
 #define EEPROM_LAYOUT_VERSION 0
@@ -39,7 +38,8 @@ struct __attribute__((packed)) IoDataFrame
     GET_PIN_VALUE,
     SET_PIN_MODE,
     SET_INPUT_PIN_DEBOUNCE,
-    ERASE_CONFIG
+    ERASE_CONFIG,
+    REQUEST_CONFIGURATION
   };
 
   IoDataFrame(uint8_t command_, const InputValue& data):
@@ -54,96 +54,98 @@ struct __attribute__((packed)) IoDataFrame
 
 RingBuf<InputValue, MAX_QUEUE_SIZE> notifyBuffer;
 
-class WrapperPortConfig
-{
-public:
-  WrapperPortConfig()
-  {
-    memset(cfg,INPUT_PULLUP,sizeof(cfg));
-  };
-
-  WrapperPortConfig(uint8_t val):defaultVal{val}
-  {
-    memset(cfg,val,sizeof(cfg));
-  };
-
-  uint8_t lenght()
-  {
-    return NUM_DIGITAL_PINS;
-  };
-
-  uint8_t& operator [] (uint8_t j) {
-    return cfg[j]; 
-  };
-
-  bool isInputPin(uint8_t j)
-  {
-    return cfg[j] == INPUT_PULLUP || cfg[j] == INPUT;
-  };
-
-  void resetConfig()
-  {
-    memset(cfg,defaultVal,sizeof(cfg));
-  }
-
-private:
-  uint8_t cfg[NUM_DIGITAL_PINS];
-  uint8_t defaultVal = INPUT_PULLUP;
-};
-
-static WrapperPortConfig portConfig;
-static WrapperPortConfig portDebounce(DEFAULT_INPUT_DEBOUNCE);
+static uint8_t pinCfg[NUM_DIGITAL_PINS];
+static uint8_t pinDebounceCfg[NUM_DIGITAL_PINS];
 static uint8_t inputLastChange[NUM_DIGITAL_PINS];
 static uint8_t inputLastValue[NUM_DIGITAL_PINS];
+  
+bool inline isInputPin(uint8_t pin)
+{
+  return pinCfg[pin] == INPUT_PULLUP || pinCfg[pin] == INPUT;
+};
+
+bool inline isConfigured(uint8_t pin)
+{
+  return pinCfg[pin] != 0xFF;
+};
+
+bool inline isReservedPin(uint8_t pin)
+{
+  return (pin == 0 || pin == 1 || pin == 18 || pin == 19);
+}
 
 HardwareSlip slip(Serial1);
 
 Scheduler runner;
 
+void initializeIOConfig()
+{
+  memset(inputLastChange,HIGH,sizeof(inputLastChange));
+  memset(pinDebounceCfg,3,sizeof(pinDebounceCfg));
+  memset(pinCfg, 0xFF, sizeof(pinCfg));
+
+  for(uint8_t j = 0; j < NUM_DIGITAL_PINS; j ++)
+  {
+    if(isReservedPin(j))
+    { 
+      continue;
+    }
+    pinMode(j,INPUT_PULLUP);
+  }
+}
+
 void HandleSetOutputPin(const IoDataFrame* data )
 {
-  if(!portConfig.isInputPin(data->pin))
-  {
-    if(digitalRead(data->pin) != data->value)
-    {
-      digitalWrite(data->pin,data->value);
-      IoDataFrame responseData({IoDataFrame::REPORT_PIN_CURRENT_VALUE,
-        data->pin,
-        data->value});
 
-      slip.sendpacket((uint8_t*)&responseData, sizeof(responseData));
-    }
+  if(!isConfigured(data->pin))
+  {
+    return;
   }
+
+  if(isInputPin(data->pin))
+  {
+    return;
+  }
+
+  if(digitalRead(data->pin) == data->value)
+  {
+    return;
+  }
+
+  digitalWrite(data->pin,data->value);
+  IoDataFrame responseData({IoDataFrame::REPORT_PIN_CURRENT_VALUE,
+    data->pin,
+    data->value});
+
+  slip.sendpacket((uint8_t*)&responseData, sizeof(responseData));
 }
 
 void HandleSetPinMode(const IoDataFrame* data )
 {
-  if(portConfig[data->pin] != data->value )
+  if(pinCfg[data->pin] == data->value )
+  {
+    return;
+  }
+
+  if(data->value == 0xFF)
+  {
+    pinMode(data->pin,INPUT_PULLUP);
+  }
+  else
   {
     pinMode(data->pin,data->value);
-    portConfig[data->pin] = data->value;
-    EEPROMwl.put(INDEX_CONFIGURATION_IO,portConfig);
   }
+  pinCfg[data->pin] = data->value;
 }
 
 void HandleSetInputPinDebounce(const IoDataFrame* data )
 {
-  if(portDebounce[data->pin] != data->value )
-  {
-    portDebounce[data->pin] = data->value;
-    EEPROMwl.put(INDEX_DEBOUNCE_IO,portDebounce);
-  }
+  pinDebounceCfg[data->pin] = data->value;
 }
 
 void HandleResetConfig(const IoDataFrame* /*data*/ )
 {
-  /*portConfig.resetConfig();
-  EEPROMwl.put(INDEX_CONFIGURATION_IO,portConfig);
-
-  portDebounce.resetConfig();
-  EEPROMwl.put(INDEX_DEBOUNCE_IO, portDebounce);*/
-  EEPROMwl.begin(0xFF, AMOUNT_OF_INDEXES);
-  EEPROMwl.begin(EEPROM_LAYOUT_VERSION, AMOUNT_OF_INDEXES);
+  initializeIOConfig();
 }
 
 void HandleGetPinValue(const IoDataFrame* data )
@@ -180,34 +182,6 @@ void slipReadCallback(uint8_t * buff,uint8_t len)
   }
 }
 
-bool inline isReservedPin(uint8_t pin)
-{
-  return (pin == 0 || pin == 1 || pin == 18 || pin == 19);
-}
-
-void initializeIOConfig()
-{
-  memset(inputLastChange,0,sizeof(inputLastChange));
-  memset(inputLastValue,0,sizeof(inputLastValue));
-
-  EEPROMwl.get(INDEX_CONFIGURATION_IO, portConfig);
-  EEPROMwl.get(INDEX_DEBOUNCE_IO,portDebounce);
-  for(uint8_t j = 0; j < portConfig.lenght(); j ++)
-  {
-    if(isReservedPin(j))
-    { 
-      continue;
-    }
-
-    pinMode(j,portConfig[j]);
-    inputLastValue[j]=digitalRead(j);
-
-    IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE,j,digitalRead(j)});
-    slip.sendpacket((uint8_t*)&data, sizeof(data));
-    delay(500);
-  }
-}
-
 bool inline checkPinChangeAndDebounce(uint8_t pin)
 {
   uint8_t tmp = digitalRead(pin);
@@ -217,7 +191,7 @@ bool inline checkPinChangeAndDebounce(uint8_t pin)
     return true;
   }
 
-  if(inputLastChange[pin] < portDebounce[pin] )
+  if(inputLastChange[pin] < pinDebounceCfg[pin] )
   {
     inputLastChange[pin]++;
     return true;
@@ -233,16 +207,26 @@ bool inline checkPinChangeAndDebounce(uint8_t pin)
   return false;
 }
 
+void taskReadInputPin();
+void taskNotifyIOChange();
+void taskProcessSlip();
+void taskStartUp();
+
+Task t1(INPUT_POLL_INTERVAL, TASK_FOREVER, &taskReadInputPin);
+Task t2(0, TASK_FOREVER, &taskNotifyIOChange);
+Task t3(0, TASK_FOREVER, &taskProcessSlip);
+Task t4(500, NUM_DIGITAL_PINS*3, &taskStartUp);
+
 void taskReadInputPin()
 {
-  for(uint8_t j = 0; j < portConfig.lenght(); j ++)
+  for(uint8_t j = 0; j < NUM_DIGITAL_PINS; j ++)
   {
     if(isReservedPin(j))
     {
       continue;
     }
 
-    if(!portConfig.isInputPin(j))
+    if(!isInputPin(j))
     {
       continue;
     }
@@ -281,9 +265,18 @@ void taskProcessSlip()
   slip.proc();
 }
 
-Task t1(INPUT_POLL_INTERVAL, TASK_FOREVER, &taskReadInputPin);
-Task t2(0, TASK_FOREVER, &taskNotifyIOChange);
-Task t3(0, TASK_FOREVER, &taskProcessSlip);
+void taskStartUp()
+{
+  static uint8_t j = 0;
+  uint8_t ndx = j++ % NUM_DIGITAL_PINS;
+  if(isConfigured(ndx))
+  {
+    return;
+  }
+ 
+  IoDataFrame data({IoDataFrame::REQUEST_CONFIGURATION,ndx,0});
+  slip.sendpacket((uint8_t*)&data, sizeof(data));
+}
 
 void setup() {
   Serial.begin(115200);
@@ -291,16 +284,16 @@ void setup() {
   Serial1.begin(9600);
   slip.setCallback(slipReadCallback);
 
-  EEPROMwl.begin(EEPROM_LAYOUT_VERSION, AMOUNT_OF_INDEXES);
-
   initializeIOConfig();
 
   runner.addTask(t1);
   runner.addTask(t2);
   runner.addTask(t3);
+  runner.addTask(t4);
   t1.enable();
   t2.enable();
   t3.enable();
+  t4.enable();
 }
 
 // the loop function runs over and over again forever
