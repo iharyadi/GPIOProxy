@@ -1,4 +1,4 @@
-# mega
+# GPIO Proxy
  It is an example sketch used with Arduino Mega 2560.  This skecth takes command to configure, read and write Arduino GPIO pin. 
  
  The idea is to make GPIO proxy.   The following description is in the context of its use in Hubitat/Smartthings ecosystem.
