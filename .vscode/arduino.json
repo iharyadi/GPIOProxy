@@ -1,0 +1,6 @@
+{
+    "board": "arduino:avr:mega",
+    "port": "COM15",
+    "configuration": "cpu=atmega2560",
+    "sketch": "multiio.ino"
+}
