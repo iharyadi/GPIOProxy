@@ -66,12 +66,32 @@ bool inline isInputPin(uint8_t pin)
 
 bool inline isConfigured(uint8_t pin)
 {
-  return pinCfg[pin] != 0xFF;
+  return pinCfg[pin] != UNCONFIGURED;
 };
 
 bool inline isReservedPin(uint8_t pin)
 {
-  return (pin == 0 || pin == 1 || pin == 18 || pin == 19);
+  return pin == 0 || pin == 1 || pin == 18 || pin == 19 || pin >= NUM_DIGITAL_PINS ;
+}
+
+void inline setPinConfig(uint8_t pin, uint8_t mode)
+{
+  pinCfg[pin] = mode;
+}
+
+uint8_t inline getPinConfig(uint8_t pin)
+{
+  return pinCfg[pin];
+}
+
+bool isValidGPIOLevel(uint8_t level)
+{
+  return level == HIGH || level == LOW;
+}
+
+bool isValidGPIOMode(uint8_t mode)
+{
+  return mode == INPUT || mode == INPUT_PULLUP || mode == OUTPUT || mode == UNCONFIGURED;
 }
 
 HardwareSlip slip(Serial1);
@@ -82,7 +102,7 @@ void initializeIOConfig()
 {
   memset(inputLastChange,HIGH,sizeof(inputLastChange));
   memset(pinDebounceCfg,3,sizeof(pinDebounceCfg));
-  memset(pinCfg, 0xFF, sizeof(pinCfg));
+  memset(pinCfg, UNCONFIGURED, sizeof(pinCfg));
 
   for(uint8_t j = 0; j < NUM_DIGITAL_PINS; j ++)
   {
@@ -97,12 +117,22 @@ void initializeIOConfig()
 void HandleSetOutputPin(const IoDataFrame* data )
 {
 
+  if(isReservedPin(data->pin))
+  {
+    return;
+  }
+
   if(!isConfigured(data->pin))
   {
     return;
   }
 
   if(isInputPin(data->pin))
+  {
+    return;
+  }
+
+  if(!isValidGPIOLevel(data->value))
   {
     return;
   }
@@ -122,12 +152,22 @@ void HandleSetOutputPin(const IoDataFrame* data )
 
 void HandleSetPinMode(const IoDataFrame* data )
 {
-  if(pinCfg[data->pin] == data->value )
+  if(isReservedPin(data->pin))
   {
     return;
   }
 
-  if(data->value == 0xFF)
+  if(!isValidGPIOMode(data->value))
+  {
+    return;
+  }
+
+  if(getPinConfig(data->pin) == data->value )
+  {
+    return;
+  }
+
+  if(data->value == UNCONFIGURED)
   {
     pinMode(data->pin,INPUT_PULLUP);
   }
@@ -135,21 +175,32 @@ void HandleSetPinMode(const IoDataFrame* data )
   {
     pinMode(data->pin,data->value);
   }
-  pinCfg[data->pin] = data->value;
+
+  setPinConfig(data->pin, data->value);
 }
 
 void HandleSetInputPinDebounce(const IoDataFrame* data )
 {
+  if(isReservedPin(data->pin))
+  {
+    return;
+  }
+
   pinDebounceCfg[data->pin] = data->value;
 }
 
 void HandleResetConfig(const IoDataFrame* /*data*/ )
 {
-  initializeIOConfig();
+
 }
 
 void HandleGetPinValue(const IoDataFrame* data )
 {
+  if(isReservedPin(data->pin))
+  {
+    return;
+  }
+
   IoDataFrame responseData({IoDataFrame::REPORT_PIN_CURRENT_VALUE,
         data->pin,
         digitalRead(data->pin)});
