@@ -6,10 +6,6 @@
 
 #include <slip.h>
 
-#define EEPROM_LAYOUT_VERSION 0
-#define AMOUNT_OF_INDEXES 2
-#define INDEX_CONFIGURATION_IO 0
-#define INDEX_DEBOUNCE_IO 1
 #define UNCONFIGURED 0xFF
 
 #define INPUT_POLL_INTERVAL 20
@@ -101,7 +97,7 @@ Scheduler runner;
 void initializeIOConfig()
 {
   memset(inputLastChange,HIGH,sizeof(inputLastChange));
-  memset(pinDebounceCfg,3,sizeof(pinDebounceCfg));
+  memset(pinDebounceCfg,DEFAULT_INPUT_DEBOUNCE,sizeof(pinDebounceCfg));
   memset(pinCfg, UNCONFIGURED, sizeof(pinCfg));
 
   for(uint8_t j = 0; j < NUM_DIGITAL_PINS; j ++)
