@@ -4,7 +4,7 @@ metadata {
         capability "Sensor"
         capability "Refresh"
         capability "Configuration"
-    }
+    }    
 }
 
 private short LOW()
@@ -42,6 +42,11 @@ private short REQUEST_CONFIGURATION()
     return 0x06
 }
 
+private short SET_DELAY_OUTPUT_COMMAND()
+{
+    return 0x07
+}
+
 private short OUTPUT()
 {
    return 0x01;   
@@ -71,7 +76,8 @@ def parse(def data) {
     
     if(data[0].toInteger() == REQUEST_CONFIGURATION() )
     {
-        initialize(state.last_request == "OFF" ? HIGH() : LOW())
+        log.info "parse initialze ${state.last_request != null?(short)state.last_request:HIGH()}"
+        initialize(state.last_request!= null?(short)state.last_request:HIGH())
         return null
     }
     
@@ -82,20 +88,8 @@ def parse(def data) {
     
     short pinValue = (short) Long.parseLong(data[2], 16);
     
-    if(state.last_request)
-    {
-        if(state.last_request == "OFF" && pinValue == LOW())
-        {
-            off()
-            return null
-       }
-       else if (state.last_request == "ON" && pinValue == HIGH())
-       {
-           on()
-           return null
-       }   
-    }
-    
+    state.last_request = pinValue
+     
     return createEvent(name:"switch", value:(pinValue == LOW())?"on":"off")
 }
 
@@ -107,44 +101,43 @@ private def setPin(short value)
     byte[] setPinValue = [SET_OUTPUT_PIN_VALUE(),getDevicePinNumber(),value];
     def cmd = [] 
     cmd += parent.sendToSerialdevice(setPinValue)
-    cmd += "delay 50"
+    cmd += "delay 100"
     parent.sendCommandP(cmd) 
 }
 
 def off() {
-    state.last_request = "OFF"
+    log.info "off called"
     setPin(HIGH())
-    
 }
 
 def on() {
-    state.last_request = "ON"
+    log.info "on called"
     setPin(LOW())
 }
 
 def initialize(short val)
 {
+    state.last_request = val
+    
     byte[] setPinMode = [SET_PIN_MODE(),getDevicePinNumber(),OUTPUT()];
     byte[] setPinValue = [SET_OUTPUT_PIN_VALUE(),getDevicePinNumber(),val];
     byte[] getPinValue = [GET_PIN_VALUE(),getDevicePinNumber(),0];
     def cmd = []
     cmd += parent.sendToSerialdevice(setPinMode)    
-    cmd += "delay 50"
+    cmd += "delay 100"
     cmd += parent.sendToSerialdevice(setPinValue) 
-    cmd += "delay 50"
+    cmd += "delay 100"
     cmd += parent.sendToSerialdevice(getPinValue) 
     cmd += "delay 2000"
     parent.sendCommandP(cmd)  
 }
        
 def installed() {
-    state.last_request = "OFF"
     initialize(HIGH())
 }
 
 def configure()
 {
-    state.last_request = "OFF"
     initialize(HIGH())
 }
 
