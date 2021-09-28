@@ -6,6 +6,10 @@
 
 #include <slip.h>
 
+#if defined(ARDUINO_AVR_LARDU_328E)
+#include <SoftwareSerial.h>
+#endif
+
 #define UNCONFIGURED 0xFF
 
 #define INPUT_POLL_INTERVAL 20
@@ -35,7 +39,8 @@ struct __attribute__((packed)) IoDataFrame
     SET_PIN_MODE,
     SET_INPUT_PIN_DEBOUNCE,
     ERASE_CONFIG,
-    REQUEST_CONFIGURATION
+    REQUEST_CONFIGURATION,
+    PULSE_OUTPUT_PIN
   };
 
   IoDataFrame(uint8_t command_, const InputValue& data):
@@ -48,12 +53,19 @@ struct __attribute__((packed)) IoDataFrame
   uint8_t value = LOW;  
 };
 
+struct __attribute__((packed)) IoOutputPulseDataFrame:IoDataFrame
+{
+  uint32_t delay;
+};
+
 RingBuf<InputValue, MAX_QUEUE_SIZE> notifyBuffer;
 
 static uint8_t pinCfg[NUM_DIGITAL_PINS];
 static uint8_t pinDebounceCfg[NUM_DIGITAL_PINS];
 static uint8_t inputLastChange[NUM_DIGITAL_PINS];
 static uint8_t inputLastValue[NUM_DIGITAL_PINS];
+
+void HandleSetOutputPinImpl(uint8_t pin, uint8_t level);
   
 bool inline isInputPin(uint8_t pin)
 {
@@ -67,7 +79,11 @@ bool inline isConfigured(uint8_t pin)
 
 bool inline isReservedPin(uint8_t pin)
 {
+#if defined(ARDUINO_AVR_LARDU_328E)
+  return pin == 0 || pin == 1 || pin == 4 || pin == 5 || pin >= NUM_DIGITAL_PINS ;
+#else
   return pin == 0 || pin == 1 || pin == 18 || pin == 19 || pin >= NUM_DIGITAL_PINS ;
+#endif
 }
 
 void inline setPinConfig(uint8_t pin, uint8_t mode)
@@ -90,9 +106,57 @@ bool isValidGPIOMode(uint8_t mode)
   return mode == INPUT || mode == INPUT_PULLUP || mode == OUTPUT || mode == UNCONFIGURED;
 }
 
-HardwareSlip slip(Serial1);
 
-Scheduler runner;
+#if defined(ARDUINO_AVR_LARDU_328E)
+SoftwareSerial Serial1(4, 5);
+SoftwareSlip slip(Serial1);
+#else
+HardwareSlip slip(Serial1);
+#endif
+
+tsk::Scheduler runner;
+
+template<uint8_t N, template <uint8_t IPin> class H, decltype(&H<N-1>::handler)... func> struct HandlerTbl: HandlerTbl< N-1, H, H<N-1>::handler, func... > {};
+
+template<template <uint8_t IPin> class H, decltype(&H<0>::handler)... func> struct HandlerTbl<0,H, func...> { 
+  decltype(&H<0>::handler) const func_array[sizeof...(func)] =  {func...};
+  decltype(&H<0>::handler) operator [] (uint8_t ndx) const { return func_array[ndx]; };
+};
+
+template <uint8_t TPin> struct TimerHandlerLow
+{
+  static void handler(){
+     HandleSetOutputPinImpl(TPin, LOW);
+  };
+};
+
+template <uint8_t TPin> struct TimerHandlerHigh
+{
+  static void handler(){
+    HandleSetOutputPinImpl(TPin, HIGH);
+  };
+};
+
+static const HandlerTbl<NUM_DIGITAL_PINS, TimerHandlerLow> timerHandlerTblLow;
+static const HandlerTbl<NUM_DIGITAL_PINS, TimerHandlerHigh> timerHandlerTblHigh;
+
+template <uint8_t N, uint8_t T> struct TimerArray:TimerArray<N-1, T>
+{
+  tsk::Task task =  {0, TASK_ONCE, timerHandlerTblHigh[N-1], &runner, false, NULL, NULL};
+  TimerArray()
+  {
+     TimerArray<0, T>::tasks[N-1]=&task;
+  }
+};
+
+template <uint8_t T> struct TimerArray<0, T>
+{
+  tsk::Task* tasks [T];
+
+  tsk::Task& operator [](uint8_t ndx){return *tasks[ndx];};
+};
+
+TimerArray<NUM_DIGITAL_PINS,NUM_DIGITAL_PINS> timerArray;
 
 void initializeIOConfig()
 {
@@ -106,42 +170,47 @@ void initializeIOConfig()
     { 
       continue;
     }
-    pinMode(j,INPUT_PULLUP);
+    pinMode(j,INPUT);
   }
 }
 
-void HandleSetOutputPin(const IoDataFrame* data )
+void HandleSetOutputPin(const struct IoDataFrame* data )
+{
+  HandleSetOutputPinImpl(data->pin, data->value);
+}
+
+void HandleSetOutputPinImpl(uint8_t pin, uint8_t value)
 {
 
-  if(isReservedPin(data->pin))
+  if(isReservedPin(pin))
   {
     return;
   }
 
-  if(!isConfigured(data->pin))
+  if(!isConfigured(pin))
   {
     return;
   }
 
-  if(isInputPin(data->pin))
+  if(isInputPin(pin))
   {
     return;
   }
 
-  if(!isValidGPIOLevel(data->value))
+  if(!isValidGPIOLevel(value))
   {
     return;
   }
 
-  if(digitalRead(data->pin) == data->value)
+  if(digitalRead(pin) == value)
   {
     return;
   }
 
-  digitalWrite(data->pin,data->value);
+  digitalWrite(pin,value);
   IoDataFrame responseData({IoDataFrame::REPORT_PIN_CURRENT_VALUE,
-    data->pin,
-    data->value});
+    pin,
+    value});
 
   slip.sendpacket((uint8_t*)&responseData, sizeof(responseData));
 }
@@ -203,6 +272,60 @@ void HandleGetPinValue(const IoDataFrame* data )
   slip.sendpacket((uint8_t*)&responseData, sizeof(responseData));
 }
 
+void HandlePulseOutputPin(const IoDataFrame* data)
+{
+    if(isReservedPin(data->pin))
+    {
+        return;
+    }
+
+    if(!isConfigured(data->pin))
+    {
+        return;
+    }
+
+    if(isInputPin(data->pin))
+    {
+        return;
+    }
+
+    tsk::Task& task = timerArray[data->pin];
+    if(task.isEnabled())
+    {
+        return;
+    }
+
+    if(!isValidGPIOLevel(data->value))
+    {
+        return;
+    }
+
+    const IoOutputPulseDataFrame* pulseData =  reinterpret_cast<const IoOutputPulseDataFrame*>(data);
+
+    uint8_t initValue = LOW;
+    tsk::TaskCallback cb =  NULL;
+    
+    if(data->value == LOW)
+    {
+        initValue = HIGH;
+        cb = timerHandlerTblHigh[data->pin];
+    }
+    else
+    {
+        initValue = LOW;
+        cb = timerHandlerTblLow[data->pin];
+    }
+
+    if(digitalRead(data->pin) != initValue)
+    {
+        digitalWrite(data->pin, initValue);
+    }
+
+    HandleSetOutputPinImpl(data->pin, data->value);
+    task.setCallback(cb);
+    task.restartDelayed(pulseData->delay);
+}
+
 void slipReadCallback(uint8_t * buff,uint8_t len)
 { 
   IoDataFrame* data = (IoDataFrame*) buff;
@@ -223,6 +346,9 @@ void slipReadCallback(uint8_t * buff,uint8_t len)
       break;
     case IoDataFrame::SET_INPUT_PIN_DEBOUNCE:
       HandleSetInputPinDebounce(data);
+      break;
+    case IoDataFrame::PULSE_OUTPUT_PIN:
+      HandlePulseOutputPin(data);
       break;
     default:
       break;
@@ -259,10 +385,10 @@ void taskNotifyIOChange();
 void taskProcessSlip();
 void taskStartUp();
 
-Task t1(INPUT_POLL_INTERVAL, TASK_FOREVER, &taskReadInputPin);
-Task t2(0, TASK_FOREVER, &taskNotifyIOChange);
-Task t3(0, TASK_FOREVER, &taskProcessSlip);
-Task t4(500, NUM_DIGITAL_PINS*3, &taskStartUp);
+tsk::Task t1(INPUT_POLL_INTERVAL, TASK_FOREVER, &taskReadInputPin);
+tsk::Task t2(0, TASK_FOREVER, &taskNotifyIOChange);
+tsk::Task t3(0, TASK_FOREVER, &taskProcessSlip);
+tsk::Task t4(500, NUM_DIGITAL_PINS*3, &taskStartUp);
 
 void taskReadInputPin()
 {
@@ -295,12 +421,6 @@ void taskNotifyIOChange()
     {
       break;
     }
-
-    /*Serial.print("GPIO pin:");
-    Serial.print(inputChange.pin, DEC);
-    Serial.print(" new value:");
-    Serial.print(inputChange.value, DEC);
-    Serial.println(" change detected");*/
 
     IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE,inputChange});
     slip.sendpacket((uint8_t*)&data, sizeof(data));
