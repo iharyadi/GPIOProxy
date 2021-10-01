@@ -12,8 +12,12 @@
 
 #define UNCONFIGURED 0xFF
 
-#define INPUT_POLL_INTERVAL 20
+#define INPUT_POLL_INTERVAL 1
 #define DEFAULT_INPUT_DEBOUNCE 3 
+
+#define DEBOUNCE_NORMAL 0 
+#define DEBOUNCE_IGNORE_LEVEL 1
+#define DEFAULT_DEBOUNCE_MODE DEBOUNCE_NORMAL 
 
 #define MAX_QUEUE_SIZE  5
 
@@ -40,7 +44,8 @@ struct __attribute__((packed)) IoDataFrame
     SET_INPUT_PIN_DEBOUNCE,
     ERASE_CONFIG,
     REQUEST_CONFIGURATION,
-    PULSE_OUTPUT_PIN
+    PULSE_OUTPUT_PIN,
+    SET_INPUT_PIN_DEBOUNCE_MODE,
   };
 
   IoDataFrame(uint8_t command_, const InputValue& data):
@@ -62,6 +67,7 @@ RingBuf<InputValue, MAX_QUEUE_SIZE> notifyBuffer;
 
 static uint8_t pinCfg[NUM_DIGITAL_PINS];
 static uint8_t pinDebounceCfg[NUM_DIGITAL_PINS];
+static uint8_t pinDebounceModeCfg[NUM_DIGITAL_PINS];
 static uint8_t inputLastChange[NUM_DIGITAL_PINS];
 static uint8_t inputLastValue[NUM_DIGITAL_PINS];
 
@@ -162,6 +168,7 @@ void initializeIOConfig()
 {
   memset(inputLastChange,HIGH,sizeof(inputLastChange));
   memset(pinDebounceCfg,DEFAULT_INPUT_DEBOUNCE,sizeof(pinDebounceCfg));
+  memset(pinDebounceModeCfg,DEFAULT_DEBOUNCE_MODE,sizeof(pinDebounceModeCfg));
   memset(pinCfg, UNCONFIGURED, sizeof(pinCfg));
 
   for(uint8_t j = 0; j < NUM_DIGITAL_PINS; j ++)
@@ -234,7 +241,7 @@ void HandleSetPinMode(const IoDataFrame* data )
 
   if(data->value == UNCONFIGURED)
   {
-    pinMode(data->pin,INPUT_PULLUP);
+    pinMode(data->pin,INPUT);
   }
   else
   {
@@ -252,6 +259,16 @@ void HandleSetInputPinDebounce(const IoDataFrame* data )
   }
 
   pinDebounceCfg[data->pin] = data->value;
+}
+
+void HandleSetInputPinDebounceMode(const IoDataFrame* data )
+{
+  if(isReservedPin(data->pin))
+  {
+    return;
+  }
+
+  pinDebounceModeCfg[data->pin] = data->value;
 }
 
 void HandleResetConfig(const IoDataFrame* /*data*/ )
@@ -350,6 +367,9 @@ void slipReadCallback(uint8_t * buff,uint8_t len)
     case IoDataFrame::PULSE_OUTPUT_PIN:
       HandlePulseOutputPin(data);
       break;
+    case IoDataFrame::SET_INPUT_PIN_DEBOUNCE_MODE:
+      HandleSetInputPinDebounceMode(data);
+      break;
     default:
       break;
   }
@@ -380,6 +400,47 @@ bool inline checkPinChangeAndDebounce(uint8_t pin)
   return false;
 }
 
+bool inline checkPinChangeAndDebounceIgnoreLevel(uint8_t pin)
+{
+    uint8_t tmp = digitalRead(pin);
+  
+    if(inputLastChange[pin] == 0)
+    {
+        if(tmp != inputLastValue[pin])
+        {
+            if(notifyBuffer.push(InputValue({pin,tmp})))
+            {
+                inputLastValue[pin] = tmp;
+                inputLastChange[pin]++;
+                return true;
+            }
+        }
+    }
+    else
+    {
+        if(tmp != inputLastValue[pin])
+        {
+            inputLastChange[pin] = 1;
+            inputLastValue[pin] = tmp;
+        }
+        else
+        {
+            inputLastChange[pin]++;
+            if(inputLastChange[pin] >= pinDebounceCfg[pin])
+            {
+                if(notifyBuffer.push(InputValue({pin,tmp})))
+                {
+                    inputLastValue[pin] = tmp;
+                    inputLastChange[pin] = 0;
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
 void taskReadInputPin();
 void taskNotifyIOChange();
 void taskProcessSlip();
@@ -404,9 +465,19 @@ void taskReadInputPin()
       continue;
     }
 
-    if(!checkPinChangeAndDebounce(j))
+    if(pinDebounceModeCfg[j] == DEBOUNCE_NORMAL)
     {
-      break;
+        if(!checkPinChangeAndDebounce(j))
+        {
+            break;
+        }
+    }
+    else
+    {
+        if(!checkPinChangeAndDebounceIgnoreLevel(j))
+        {
+            break;
+        }
     }
   }
 }
