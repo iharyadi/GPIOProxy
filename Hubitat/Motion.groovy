@@ -17,6 +17,16 @@ private short LOW()
     return 0;   
 }
 
+private short INPUT()
+{
+   return 0x00;   
+}
+
+private short UNCONFIGURED()
+{
+   return 0xFF;   
+}
+
 private short INPUT_PULLUP()
 {
    return 0x02;   
@@ -44,9 +54,6 @@ private short getDevicePinNumber()
 }
 
 def parse(def data) { 
-    
-    log.info "data $data"
-    
     if(data[0].toInteger() == REQUEST_CONFIGURATION() )
     {
         initialize()
@@ -67,14 +74,14 @@ def parse(def data) {
        
     short pinValue = (short) Long.parseLong(data[2], 16);
     
-    return createEvent(name:"motion", value:(pinValue != LOW())?"active":"inactive", isStateChange:true)
+    return createEvent(name:"motion", value:(pinValue != LOW())?"active":"inactive")
 }
 
 def configure_child() {
 }
 
 def initialize() {
-    byte[] setPinMode  = [SET_PIN_MODE(),getDevicePinNumber(),INPUT_PULLUP()];
+    byte[] setPinMode  = [SET_PIN_MODE(),getDevicePinNumber(),INPUT()];
     byte[] getpinvalue = [GET_PIN_VALUE(),getDevicePinNumber(),0];
     def cmd = []
     cmd += parent.sendToSerialdevice(setPinMode)  
@@ -91,6 +98,13 @@ def installed() {
 def configure()
 {
     initialize()   
+}
+
+def uninstalled() {
+    byte[] setPinMode = [SET_PIN_MODE(),getDevicePinNumber(),UNCONFIGURED()];
+    def cmd = []
+    cmd += parent.sendToSerialdevice(setPinMode)    
+    parent.sendCommandP(cmd) 
 }
 
 def refresh()

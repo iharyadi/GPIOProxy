@@ -22,6 +22,11 @@ private short INPUT_PULLUP()
    return 0x02;   
 }
 
+private short UNCONFIGURED()
+{
+   return 0xFF;   
+}
+
 private short SET_PIN_MODE()
 {
     return 0x03   
@@ -44,9 +49,6 @@ private short getDevicePinNumber()
 }
 
 def parse(def data) { 
-    
-    log.info "data $data"
-    
     if(data[0].toInteger() == REQUEST_CONFIGURATION() )
     {
         initialize()
@@ -67,7 +69,7 @@ def parse(def data) {
        
     short pinValue = (short) Long.parseLong(data[2], 16);
     
-    return createEvent(name:"contact", value:(pinValue != LOW())?"open":"closed", isStateChange:true)
+    return createEvent(name:"contact", value:(pinValue != LOW())?"open":"closed")
 }
 
 def configure_child() {
@@ -91,6 +93,13 @@ def installed() {
 def configure()
 {
     initialize();   
+}
+
+def uninstalled() {
+    byte[] setPinMode = [SET_PIN_MODE(),getDevicePinNumber(),UNCONFIGURED()];
+    def cmd = []
+    cmd += parent.sendToSerialdevice(setPinMode)    
+    parent.sendCommandP(cmd) 
 }
 
 def refresh()

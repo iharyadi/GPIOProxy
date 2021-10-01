@@ -57,6 +57,11 @@ private short INPUT_PULLUP()
    return 0x02;   
 }
 
+private short UNCONFIGURED()
+{
+   return 0xFF;   
+}
+
 private short getDevicePinNumber()
 {
     String devicePinNumber = device.getDataValue("pageNumber")
@@ -142,7 +147,7 @@ def configure()
 }
 
 def uninstalled() {
-    byte[] setPinMode = [SET_PIN_MODE(),getDevicePinNumber(),INPUT_PULLUP()];
+    byte[] setPinMode = [SET_PIN_MODE(),getDevicePinNumber(),UNCONFIGURED()];
     def cmd = []
     cmd += parent.sendToSerialdevice(setPinMode)    
     parent.sendCommandP(cmd) 
