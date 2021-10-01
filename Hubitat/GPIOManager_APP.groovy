@@ -48,7 +48,7 @@ def unusedOption()
 
 def availableDriver()
 {
-    return [unusedOption() , "Contact" , "Motion", "ShockSensor", "Tone", "Relay"]
+    return [unusedOption() , "Contact" , "Motion", "ShockSensor", "Tone", "Relay", "PulseDevice"]
 }
 
 def mainPage() {
@@ -108,8 +108,11 @@ def updateChildHandler()
         if (settings."pinDTH${it}" == null || settings."pinDTH${it}" == "unused") {
             return
         }
-        envSensor.createGPIOChild(settings."pinDTH${it}",it, settings."deviceLabel${it}")
+        
+        envSensor.createSerialDeviceChildWithLabel(settings."pinDTH${it}",it, settings."deviceLabel${it}")
     }
+    
+    envSensor.bindSerialDevices()
 }
 
 def updated() {
