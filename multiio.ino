@@ -21,13 +21,13 @@
 
 #define MAX_QUEUE_SIZE  5
 
-struct  __attribute__((packed))  InputValue
+struct  __attribute__((packed))  GPIOValue
 {
-  InputValue(uint8_t pin_,uint8_t value_):pin(pin_),value(value_)
+  GPIOValue(uint8_t pin_,uint8_t value_):pin(pin_),value(value_)
   {
   }
 
-  InputValue(){};
+  GPIOValue(){};
 
   uint8_t pin = 0xFF;
   uint8_t value = LOW;
@@ -48,7 +48,7 @@ struct __attribute__((packed)) IoDataFrame
     SET_INPUT_PIN_DEBOUNCE_MODE,
   };
 
-  IoDataFrame(uint8_t command_, const InputValue& data):
+  IoDataFrame(uint8_t command_, const GPIOValue& data):
   command(command_), pin(data.pin), value(data.value){};
   IoDataFrame(uint8_t command_, uint8_t pin_, uint8_t value_):
   command(command_), pin(pin_), value(value_){};
@@ -63,7 +63,7 @@ struct __attribute__((packed)) IoOutputPulseDataFrame:IoDataFrame
   uint32_t delay;
 };
 
-RingBuf<InputValue, MAX_QUEUE_SIZE> notifyBuffer;
+RingBuf<GPIOValue, MAX_QUEUE_SIZE> notifyBuffer;
 
 static uint8_t pinCfg[NUM_DIGITAL_PINS];
 static uint8_t pinDebounceCfg[NUM_DIGITAL_PINS];
@@ -215,11 +215,8 @@ void HandleSetOutputPinImpl(uint8_t pin, uint8_t value)
   }
 
   digitalWrite(pin,value);
-  IoDataFrame responseData({IoDataFrame::REPORT_PIN_CURRENT_VALUE,
-    pin,
-    value});
 
-  slip.sendpacket((uint8_t*)&responseData, sizeof(responseData));
+  notifyBuffer.lockedPush(GPIOValue({pin,value}));
 }
 
 void HandleSetPinMode(const IoDataFrame* data )
@@ -283,10 +280,7 @@ void HandleGetPinValue(const IoDataFrame* data )
     return;
   }
 
-  IoDataFrame responseData({IoDataFrame::REPORT_PIN_CURRENT_VALUE,
-        data->pin,
-        digitalRead(data->pin)});
-  slip.sendpacket((uint8_t*)&responseData, sizeof(responseData));
+  notifyBuffer.lockedPush(GPIOValue({data->pin,digitalRead(data->pin)}));
 }
 
 void HandlePulseOutputPin(const IoDataFrame* data)
@@ -390,7 +384,7 @@ bool inline checkPinChangeAndDebounce(uint8_t pin)
     return true;
   }
 
-  if(notifyBuffer.push(InputValue({pin,tmp})))
+  if(notifyBuffer.lockedPush(GPIOValue({pin,tmp})))
   {
     inputLastValue[pin] = tmp;
     inputLastChange[pin] = 0;
@@ -408,7 +402,7 @@ bool inline checkPinChangeAndDebounceIgnoreLevel(uint8_t pin)
     {
         if(tmp != inputLastValue[pin])
         {
-            if(notifyBuffer.push(InputValue({pin,tmp})))
+            if(notifyBuffer.lockedPush(GPIOValue({pin,tmp})))
             {
                 inputLastValue[pin] = tmp;
                 inputLastChange[pin]++;
@@ -428,7 +422,7 @@ bool inline checkPinChangeAndDebounceIgnoreLevel(uint8_t pin)
             inputLastChange[pin]++;
             if(inputLastChange[pin] >= pinDebounceCfg[pin])
             {
-                if(notifyBuffer.push(InputValue({pin,tmp})))
+                if(notifyBuffer.lockedPush(GPIOValue({pin,tmp})))
                 {
                     inputLastValue[pin] = tmp;
                     inputLastChange[pin] = 0;
@@ -484,16 +478,16 @@ void taskReadInputPin()
 
 void taskNotifyIOChange()
 {
-  for(uint8_t i = 0; i < 5; i ++)
+  for(uint8_t i = 0; i < MAX_QUEUE_SIZE; i ++)
   {
 
-    InputValue inputChange;
-    if(!notifyBuffer.lockedPop(inputChange))
+    GPIOValue value;
+    if(!notifyBuffer.lockedPop(value))
     {
       break;
     }
 
-    IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE,inputChange});
+    IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE,value});
     slip.sendpacket((uint8_t*)&data, sizeof(data));
   }
 }
