@@ -68,8 +68,9 @@ RingBuf<GPIOValue, MAX_QUEUE_SIZE> notifyBuffer;
 static uint8_t pinCfg[NUM_DIGITAL_PINS];
 static uint8_t pinDebounceCfg[NUM_DIGITAL_PINS];
 static uint8_t pinDebounceModeCfg[NUM_DIGITAL_PINS];
-static uint8_t inputLastChange[NUM_DIGITAL_PINS];
-static uint8_t inputLastValue[NUM_DIGITAL_PINS];
+static uint8_t pinLastChange[NUM_DIGITAL_PINS];
+static uint8_t pinLastValue[NUM_DIGITAL_PINS];
+static uint8_t pinLastValueReported[NUM_DIGITAL_PINS];
 
 void HandleSetOutputPinImpl(uint8_t pin, uint8_t level);
   
@@ -166,10 +167,11 @@ TimerArray<NUM_DIGITAL_PINS,NUM_DIGITAL_PINS> timerArray;
 
 void initializeIOConfig()
 {
-  memset(inputLastChange,HIGH,sizeof(inputLastChange));
+  memset(pinLastChange,HIGH,sizeof(pinLastChange));
   memset(pinDebounceCfg,DEFAULT_INPUT_DEBOUNCE,sizeof(pinDebounceCfg));
   memset(pinDebounceModeCfg,DEFAULT_DEBOUNCE_MODE,sizeof(pinDebounceModeCfg));
   memset(pinCfg, UNCONFIGURED, sizeof(pinCfg));
+  memset(pinLastValueReported,0,sizeof(pinLastValueReported));
 
   for(uint8_t j = 0; j < NUM_DIGITAL_PINS; j ++)
   {
@@ -372,22 +374,22 @@ void slipReadCallback(uint8_t * buff,uint8_t len)
 bool inline checkPinChangeAndDebounce(uint8_t pin)
 {
   uint8_t tmp = digitalRead(pin);
-  if(tmp == inputLastValue[pin])
+  if(tmp == pinLastValue[pin])
   {
-    inputLastChange[pin] = 0;
+    pinLastChange[pin] = 0;
     return true;
   }
 
-  if(inputLastChange[pin] < pinDebounceCfg[pin] )
+  if(pinLastChange[pin] < pinDebounceCfg[pin] )
   {
-    inputLastChange[pin]++;
+    pinLastChange[pin]++;
     return true;
   }
 
   if(notifyBuffer.lockedPush(GPIOValue({pin,tmp})))
   {
-    inputLastValue[pin] = tmp;
-    inputLastChange[pin] = 0;
+    pinLastValue[pin] = tmp;
+    pinLastChange[pin] = 0;
     return true;
   }
 
@@ -397,41 +399,40 @@ bool inline checkPinChangeAndDebounce(uint8_t pin)
 bool inline checkPinChangeAndDebounceIgnoreLevel(uint8_t pin)
 {
     uint8_t tmp = digitalRead(pin);
-  
-    if(inputLastChange[pin] == 0)
+
+    if(pinLastChange[pin] == 0)
     {
-        if(tmp != inputLastValue[pin])
+        if(tmp != pinLastValue[pin])
         {
-            if(notifyBuffer.lockedPush(GPIOValue({pin,tmp})))
+            if(notifyBuffer.lockedPush(GPIOValue({pin,HIGH})))
             {
-                inputLastValue[pin] = tmp;
-                inputLastChange[pin]++;
+                pinLastValue[pin] = tmp;
+                pinLastChange[pin]++;
                 return true;
             }
         }
     }
     else
     {
-        if(tmp != inputLastValue[pin])
+        if(tmp != pinLastValue[pin])
         {
-            inputLastChange[pin] = 1;
-            inputLastValue[pin] = tmp;
+            pinLastChange[pin] = 1;
+            pinLastValue[pin] = tmp;
         }
         else
         {
-            inputLastChange[pin]++;
-            if(inputLastChange[pin] >= pinDebounceCfg[pin])
+            pinLastChange[pin]++;
+            if(pinLastChange[pin] >= pinDebounceCfg[pin])
             {
-                if(notifyBuffer.lockedPush(GPIOValue({pin,tmp})))
+                if(notifyBuffer.lockedPush(GPIOValue({pin,LOW})))
                 {
-                    inputLastValue[pin] = tmp;
-                    inputLastChange[pin] = 0;
+                    pinLastValue[pin] = tmp;
+                    pinLastChange[pin] = 0;
                     return true;
                 }
             }
         }
     }
-
     return false;
 }
 
@@ -439,11 +440,13 @@ void taskReadInputPin();
 void taskNotifyIOChange();
 void taskProcessSlip();
 void taskStartUp();
+void taskReportPin();
 
 tsk::Task t1(INPUT_POLL_INTERVAL, TASK_FOREVER, &taskReadInputPin);
 tsk::Task t2(0, TASK_FOREVER, &taskNotifyIOChange);
 tsk::Task t3(0, TASK_FOREVER, &taskProcessSlip);
-tsk::Task t4(500, NUM_DIGITAL_PINS*3, &taskStartUp);
+tsk::Task t4(350, NUM_DIGITAL_PINS*3, &taskStartUp);
+tsk::Task t5(5000, TASK_FOREVER, &taskReportPin);
 
 void taskReadInputPin()
 {
@@ -480,7 +483,6 @@ void taskNotifyIOChange()
 {
   for(uint8_t i = 0; i < MAX_QUEUE_SIZE; i ++)
   {
-
     GPIOValue value;
     if(!notifyBuffer.lockedPop(value))
     {
@@ -489,6 +491,46 @@ void taskNotifyIOChange()
 
     IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE,value});
     slip.sendpacket((uint8_t*)&data, sizeof(data));
+    pinLastValueReported[value.pin] = 0;
+    delayMicroseconds(100);
+  }
+}
+
+void taskReportPin()
+{
+  for(uint8_t j = 0; j < NUM_DIGITAL_PINS; j ++)
+  {
+    if(isReservedPin(j))
+    {
+      continue;
+    }
+
+    if(!isConfigured(j))
+    {
+      continue;
+    }
+
+    if(pinLastValueReported[j] < 60)
+    {
+        pinLastValueReported[j]++;
+        continue;
+    }
+
+    uint8_t value = LOW;
+
+    if(pinDebounceModeCfg[j] == DEBOUNCE_NORMAL)
+    {
+        value = digitalRead(j);
+    }
+    else
+    {
+        value = (pinLastChange[j] == 0) ? LOW:HIGH; 
+    }
+
+    IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE,GPIOValue(j,value)});
+    slip.sendpacket((uint8_t*)&data, sizeof(data));
+    pinLastValueReported[j] = 0;
+    delayMicroseconds(100);
   }
 }
 
@@ -511,7 +553,7 @@ void taskStartUp()
 }
 
 void setup() {
-  Serial.begin(115200);
+  //Serial.begin(115200);
 
   Serial1.begin(9600);
   slip.setCallback(slipReadCallback);
@@ -522,10 +564,13 @@ void setup() {
   runner.addTask(t2);
   runner.addTask(t3);
   runner.addTask(t4);
+  runner.addTask(t5);
   t1.enable();
   t2.enable();
   t3.enable();
   t4.enable();
+  t4.delay(10000);
+  t5.enable();
 }
 
 // the loop function runs over and over again forever
