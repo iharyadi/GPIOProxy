@@ -17,68 +17,69 @@
 #define REQUEST_CONFIG_INTERVAL_PER_PIN 350
 #define REQUEST_CONFIG_DELAY 10000
 
-#define DEFAULT_INPUT_DEBOUNCE 3 
+#define DEFAULT_INPUT_DEBOUNCE 3
 
-#define DEBOUNCE_NORMAL 0 
+#define DEBOUNCE_NORMAL 0
 #define DEBOUNCE_IGNORE_LEVEL 1
-#define DEFAULT_DEBOUNCE_MODE DEBOUNCE_NORMAL 
+#define DEFAULT_DEBOUNCE_MODE DEBOUNCE_NORMAL
 
-#define MAX_QUEUE_SIZE  5
+#define MAX_QUEUE_SIZE 5
 
 #if defined(ARDUINO_SAM_DUE)
-constexpr bool useInterrupt =  true;
-#define  VOLATILE volatile 
+constexpr bool useInterrupt = true;
+#define VOLATILE volatile
 #else
-constexpr bool useInterrupt =  false;
-#define  VOLATILE 
+constexpr bool useInterrupt = false;
+#define VOLATILE
 #endif
 
-template<bool b>
+template <bool b>
 class ScopedDisableInterruptImp
 {
 public:
-    ScopedDisableInterruptImp()
+  ScopedDisableInterruptImp()
+  {
+    if (count == 0)
     {
-      if(count == 0)
-      {
-        noInterrupts();
-      }
-      count++;
+      noInterrupts();
     }
+    count++;
+  }
 
-    ~ScopedDisableInterruptImp()
+  ~ScopedDisableInterruptImp()
+  {
+    count--;
+    if (count == 0)
     {
-      count--;
-      if(count == 0)
-      {
-        interrupts();
-      }
+      interrupts();
     }
+  }
+
 private:
   static uint32_t count;
 };
 
-template<bool b>
+template <bool b>
 uint32_t ScopedDisableInterruptImp<b>::count = 0;
 
-template<>
+template <>
 class ScopedDisableInterruptImp<false>
 {
 public:
-    ScopedDisableInterruptImp()
-    {
-    }
+  ScopedDisableInterruptImp()
+  {
+  }
 
-    ~ScopedDisableInterruptImp()
-    {
-    }
+  ~ScopedDisableInterruptImp()
+  {
+  }
 };
 
 typedef ScopedDisableInterruptImp<useInterrupt> ScopedDisableInterrupt;
 
-struct  __attribute__((packed))  GPIOValue
+struct __attribute__((packed)) GPIOValue
 {
-  GPIOValue(uint8_t pin_,uint8_t value_):pin(pin_),value(value_)
+  GPIOValue(uint8_t pin_, uint8_t value_) : pin(pin_), value(value_)
   {
   }
 
@@ -103,17 +104,15 @@ struct __attribute__((packed)) IoDataFrame
     SET_INPUT_PIN_DEBOUNCE_MODE,
   };
 
-  IoDataFrame(uint8_t command_, const GPIOValue& data):
-  command(command_), pin(data.pin), value(data.value){};
-  IoDataFrame(uint8_t command_, uint8_t pin_, uint8_t value_):
-  command(command_), pin(pin_), value(value_){};
+  IoDataFrame(uint8_t command_, const GPIOValue &data) : command(command_), pin(data.pin), value(data.value){};
+  IoDataFrame(uint8_t command_, uint8_t pin_, uint8_t value_) : command(command_), pin(pin_), value(value_){};
   IoDataFrame(){};
   uint8_t command = 0xFF;
-  uint8_t pin = 0;      
-  uint8_t value = LOW;  
+  uint8_t pin = 0;
+  uint8_t value = LOW;
 };
 
-struct __attribute__((packed)) IoOutputPulseDataFrame:IoDataFrame
+struct __attribute__((packed)) IoOutputPulseDataFrame : IoDataFrame
 {
   uint32_t delay;
 };
@@ -132,7 +131,7 @@ bool checkPinChangeAndDebounceIgnoreLevelInterruptHandler(uint8_t pin);
 bool checkPinChangeAndDebounceIgnoreLevelInterruptTimeout(uint8_t pin);
 bool checkPinChangeAndDebounceInterruptHandler(uint8_t pin);
 bool checkPinChangeAndDebounceInterruptTimeout(uint8_t pin);
-  
+
 bool inline isInputPin(uint8_t pin)
 {
   return pinCfg[pin] == INPUT_PULLUP || pinCfg[pin] == INPUT;
@@ -146,9 +145,9 @@ bool inline isConfigured(uint8_t pin)
 bool inline isReservedPin(uint8_t pin)
 {
 #if defined(ARDUINO_AVR_LARDU_328E)
-  return pin == 0 || pin == 1 || pin == 4 || pin == 5 || pin >= NUM_DIGITAL_PINS ;
+  return pin == 0 || pin == 1 || pin == 4 || pin == 5 || pin >= NUM_DIGITAL_PINS;
 #else
-  return pin == 0 || pin == 1 || pin == 18 || pin == 19 || pin >= NUM_DIGITAL_PINS ;
+  return pin == 0 || pin == 1 || pin == 18 || pin == 19 || pin >= NUM_DIGITAL_PINS;
 #endif
 }
 
@@ -179,9 +178,7 @@ bool inline isNormalDebounce(uint8_t pin)
 
 uint8_t inline getPinValueHelper(uint8_t pin)
 {
-  return (isInputPin(pin) && !isNormalDebounce(pin)) ? 
-    (pinLastChange[pin] == 0) ? LOW:HIGH : 
-    digitalRead(pin);
+  return (isInputPin(pin) && !isNormalDebounce(pin)) ? (pinLastChange[pin] == 0) ? LOW : HIGH : digitalRead(pin);
 }
 
 #if defined(ARDUINO_AVR_LARDU_328E)
@@ -193,24 +190,33 @@ HardwareSlip slip(Serial1);
 
 tsk::Scheduler runner;
 
-template<uint8_t N, template <uint8_t IPin> class H, decltype(&H<N-1>::handler)... func> struct HandlerTbl: HandlerTbl< N-1, H, H<N-1>::handler, func... > {};
+template <uint8_t N, template <uint8_t IPin> class H, decltype(&H<N - 1>::handler)... func>
+struct HandlerTbl : HandlerTbl<N - 1, H, H<N - 1>::handler, func...>
+{
+};
 
-template<template <uint8_t IPin> class H, decltype(&H<0>::handler)... func> struct HandlerTbl<0,H, func...> { 
-  const decltype(&H<0>::handler) func_array[sizeof...(func)] =  {func...};
-  decltype(&H<0>::handler) operator [] (uint8_t ndx) const { return func_array[ndx]; };
+template <template <uint8_t IPin> class H, decltype(&H<0>::handler)... func>
+struct HandlerTbl<0, H, func...>
+{
+  const decltype(&H<0>::handler) func_array[sizeof...(func)] = {func...};
+  decltype(&H<0>::handler) operator[](uint8_t ndx) const { return func_array[ndx]; };
   typedef decltype(&H<0>::handler) handler_type;
 };
 
-template <uint8_t TPin> struct TimerHandlerLow
+template <uint8_t TPin>
+struct TimerHandlerLow
 {
-  static void handler(){
-     HandleSetOutputPinImpl(TPin, LOW);
+  static void handler()
+  {
+    HandleSetOutputPinImpl(TPin, LOW);
   };
 };
 
-template <uint8_t TPin> struct TimerHandlerHigh
+template <uint8_t TPin>
+struct TimerHandlerHigh
 {
-  static void handler(){
+  static void handler()
+  {
     HandleSetOutputPinImpl(TPin, HIGH);
   };
 };
@@ -218,7 +224,8 @@ template <uint8_t TPin> struct TimerHandlerHigh
 static const HandlerTbl<NUM_DIGITAL_PINS, TimerHandlerLow> timerHandlerTblLow;
 static const HandlerTbl<NUM_DIGITAL_PINS, TimerHandlerHigh> timerHandlerTblHigh;
 
-template <uint8_t TPin> struct IntHandlerNormal
+template <uint8_t TPin>
+struct IntHandlerNormal
 {
   static void handler()
   {
@@ -226,11 +233,12 @@ template <uint8_t TPin> struct IntHandlerNormal
   }
 };
 
-template <uint8_t TPin> struct IntHandlerIgnoreLevel
+template <uint8_t TPin>
+struct IntHandlerIgnoreLevel
 {
   static void handler()
   {
-    
+
     checkPinChangeAndDebounceIgnoreLevelInterruptHandler(TPin);
   }
 };
@@ -241,93 +249,102 @@ static const HandlerTbl<NUM_DIGITAL_PINS, IntHandlerIgnoreLevel> intIgnoreLevelH
 template <bool b>
 struct timeoutHandler
 {
-  template <uint8_t TPin> struct timeoutHandlerNormal
+  template <uint8_t TPin>
+  struct timeoutHandlerNormal
   {
     static bool handler()
     {
       checkPinChangeAndDebounceInterruptTimeout(TPin);
     }
   };
-  template <uint8_t TPin> using Normal = timeoutHandlerNormal<TPin>;
+  template <uint8_t TPin>
+  using Normal = timeoutHandlerNormal<TPin>;
 
-  template <uint8_t TPin> struct timeoutHandlerIgnoreLevel
+  template <uint8_t TPin>
+  struct timeoutHandlerIgnoreLevel
   {
     static bool handler()
     {
-      
+
       checkPinChangeAndDebounceIgnoreLevelInterruptTimeout(TPin);
     }
   };
-  template <uint8_t TPin> using IgnoreLevel = timeoutHandlerIgnoreLevel<TPin>;
+  template <uint8_t TPin>
+  using IgnoreLevel = timeoutHandlerIgnoreLevel<TPin>;
 };
 
 template <>
 struct timeoutHandler<false>
 {
-  template <uint8_t TPin> struct timeoutHandlerNormal
+  template <uint8_t TPin>
+  struct timeoutHandlerNormal
   {
     static bool handler()
     {
       checkPinChangeAndDebounce(TPin);
     }
   };
-  template <uint8_t TPin> using Normal = timeoutHandlerNormal<TPin>;
+  template <uint8_t TPin>
+  using Normal = timeoutHandlerNormal<TPin>;
 
-  template <uint8_t TPin> struct timeoutHandlerIgnoreLevel
+  template <uint8_t TPin>
+  struct timeoutHandlerIgnoreLevel
   {
     static bool handler()
     {
       checkPinChangeAndDebounceIgnoreLevel(TPin);
     }
   };
-  template <uint8_t TPin> using IgnoreLevel = timeoutHandlerIgnoreLevel<TPin>;
+  template <uint8_t TPin>
+  using IgnoreLevel = timeoutHandlerIgnoreLevel<TPin>;
 };
 
-static const HandlerTbl<NUM_DIGITAL_PINS, timeoutHandler<useInterrupt>::Normal > timeoutNormalHandlerTbl;
-static const HandlerTbl<NUM_DIGITAL_PINS, timeoutHandler<useInterrupt>::IgnoreLevel >  timeoutIgnoreLevelHandlerTbl;
+static const HandlerTbl<NUM_DIGITAL_PINS, timeoutHandler<useInterrupt>::Normal> timeoutNormalHandlerTbl;
+static const HandlerTbl<NUM_DIGITAL_PINS, timeoutHandler<useInterrupt>::IgnoreLevel> timeoutIgnoreLevelHandlerTbl;
 
+static const HandlerTbl<NUM_DIGITAL_PINS, timeoutHandler<useInterrupt>::Normal>::handler_type *const timeoutHandlerMap[] = {
+    timeoutNormalHandlerTbl.func_array,
+    timeoutIgnoreLevelHandlerTbl.func_array};
 
-static const HandlerTbl<NUM_DIGITAL_PINS, timeoutHandler<useInterrupt>::Normal >::handler_type * const timeoutHandlerMap[] = { 
-  timeoutNormalHandlerTbl.func_array, 
-  timeoutIgnoreLevelHandlerTbl.func_array  };
-
-template <uint8_t N, uint8_t T> struct TimerArray:TimerArray<N-1, T>
+template <uint8_t N, uint8_t T>
+struct TimerArray : TimerArray<N - 1, T>
 {
-  tsk::Task task =  {0, TASK_ONCE, timerHandlerTblHigh[N-1], &runner, false, NULL, NULL};
+  tsk::Task task = {0, TASK_ONCE, timerHandlerTblHigh[N - 1], &runner, false, NULL, NULL};
   TimerArray()
   {
-     TimerArray<0, T>::tasks[N-1]=&task;
+    TimerArray<0, T>::tasks[N - 1] = &task;
   }
 };
 
-template <uint8_t T> struct TimerArray<0, T>
+template <uint8_t T>
+struct TimerArray<0, T>
 {
-  tsk::Task* tasks [T];
+  tsk::Task *tasks[T];
 
-  tsk::Task& operator [](uint8_t ndx){return *tasks[ndx];};
+  tsk::Task &operator[](uint8_t ndx) { return *tasks[ndx]; };
 };
 
-TimerArray<NUM_DIGITAL_PINS,NUM_DIGITAL_PINS> timerArray;
+TimerArray<NUM_DIGITAL_PINS, NUM_DIGITAL_PINS> timerArray;
 
 void initializeIOConfig()
 {
-  memset(const_cast<uint8_t*>(pinLastChange),HIGH,sizeof(pinLastChange));
-  memset(const_cast<uint8_t*>(pinDebounceValueCfg),DEFAULT_INPUT_DEBOUNCE,sizeof(pinDebounceValueCfg));
-  memset(const_cast<uint8_t*>(pinDebounceModeCfg),DEFAULT_DEBOUNCE_MODE,sizeof(pinDebounceModeCfg));
-  memset(const_cast<uint8_t*>(pinCfg), UNCONFIGURED, sizeof(pinCfg));
-  memset(const_cast<uint8_t*>(pinLastValueReported),0,sizeof(pinLastValueReported));
+  memset(const_cast<uint8_t *>(pinLastChange), HIGH, sizeof(pinLastChange));
+  memset(const_cast<uint8_t *>(pinDebounceValueCfg), DEFAULT_INPUT_DEBOUNCE, sizeof(pinDebounceValueCfg));
+  memset(const_cast<uint8_t *>(pinDebounceModeCfg), DEFAULT_DEBOUNCE_MODE, sizeof(pinDebounceModeCfg));
+  memset(const_cast<uint8_t *>(pinCfg), UNCONFIGURED, sizeof(pinCfg));
+  memset(const_cast<uint8_t *>(pinLastValueReported), 0, sizeof(pinLastValueReported));
 
-  for(uint8_t j = 0; j < NUM_DIGITAL_PINS; j ++)
+  for (uint8_t j = 0; j < NUM_DIGITAL_PINS; j++)
   {
-    if(isReservedPin(j))
-    { 
+    if (isReservedPin(j))
+    {
       continue;
     }
-    pinMode(j,INPUT);
+    pinMode(j, INPUT);
   }
 }
 
-void HandleSetOutputPin(const struct IoDataFrame* data )
+void HandleSetOutputPin(const struct IoDataFrame *data)
 {
   HandleSetOutputPinImpl(data->pin, data->value);
 }
@@ -335,78 +352,77 @@ void HandleSetOutputPin(const struct IoDataFrame* data )
 void HandleSetOutputPinImpl(uint8_t pin, uint8_t value)
 {
 
-  if(isReservedPin(pin))
+  if (isReservedPin(pin))
   {
     return;
   }
 
-  if(!isConfigured(pin))
+  if (!isConfigured(pin))
   {
     return;
   }
 
-  if(isInputPin(pin))
+  if (isInputPin(pin))
   {
     return;
   }
 
-  if(!isValidGPIOLevel(value))
+  if (!isValidGPIOLevel(value))
   {
     return;
   }
 
-  if(digitalRead(pin) == value)
+  if (digitalRead(pin) == value)
   {
     return;
   }
 
-  digitalWrite(pin,value);
+  digitalWrite(pin, value);
 
   {
     ScopedDisableInterrupt interruptScope;
-    notifyBuffer.push(GPIOValue({pin,value}));
+    notifyBuffer.push(GPIOValue({pin, value}));
   }
 }
 
-template<bool b>
+template <bool b>
 void configureInterrupt(uint8_t pin)
 {
-  if(isInputPin(pin))
+  if (isInputPin(pin))
   {
-    if(isNormalDebounce(pin))
+    if (isNormalDebounce(pin))
     {
-      attachInterrupt(digitalPinToInterrupt(pin), intNormalHandlerTbl[pin],CHANGE);
+      attachInterrupt(digitalPinToInterrupt(pin), intNormalHandlerTbl[pin], CHANGE);
     }
     else
     {
-      attachInterrupt(digitalPinToInterrupt(pin), intIgnoreLevelHandlerTbl[pin],CHANGE);
+      attachInterrupt(digitalPinToInterrupt(pin), intIgnoreLevelHandlerTbl[pin], CHANGE);
     }
   }
   else
   {
-    attachInterrupt(digitalPinToInterrupt(pin), NULL,CHANGE);
+    attachInterrupt(digitalPinToInterrupt(pin), NULL, CHANGE);
   }
 }
 
-template<>
+template <>
 void configureInterrupt<false>(uint8_t)
 {
-
 }
 
-void HandleSetPinMode(const IoDataFrame* data )
+void HandleSetPinMode(const IoDataFrame *data)
 {
-  if(isReservedPin(data->pin))
+  if (isReservedPin(data->pin))
   {
     return;
   }
 
-  if(!isValidGPIOMode(data->value))
+  if (!isValidGPIOMode(data->value))
   {
     return;
   }
 
-  if(getPinConfig(data->pin) == data->value )
+  if (getPinConfig(data->pin) == data->value)
   {
     return;
   }
@@ -414,40 +430,40 @@ void HandleSetPinMode(const IoDataFrame* data )
   {
     ScopedDisableInterrupt interruptScope;
 
-    if(data->value == UNCONFIGURED)
+    if (data->value == UNCONFIGURED)
     {
-      pinMode(data->pin,INPUT);
+      pinMode(data->pin, INPUT);
     }
     else
     {
-      pinMode(data->pin,data->value);
+      pinMode(data->pin, data->value);
     }
 
     pinLastValue[data->pin] = digitalRead(data->pin);
-    pinLastChange[data->pin] = 0; 
+    pinLastChange[data->pin] = 0;
     setPinConfig(data->pin, data->value);
     configureInterrupt<useInterrupt>(data->pin);
   }
 }
 
-void HandleSetInputPinDebounce(const IoDataFrame* data )
+void HandleSetInputPinDebounce(const IoDataFrame *data)
 {
-  if(isReservedPin(data->pin))
+  if (isReservedPin(data->pin))
   {
     return;
   }
 
   {
     ScopedDisableInterrupt interruptScope;
-    pinDebounceValueCfg[data->pin] = data->value;  
+    pinDebounceValueCfg[data->pin] = data->value;
     pinLastValue[data->pin] = digitalRead(data->pin);
     pinLastChange[data->pin] = 0;
   }
 }
 
-void HandleSetInputPinDebounceMode(const IoDataFrame* data )
+void HandleSetInputPinDebounceMode(const IoDataFrame *data)
 {
-  if(isReservedPin(data->pin))
+  if (isReservedPin(data->pin))
   {
     return;
   }
@@ -461,107 +477,106 @@ void HandleSetInputPinDebounceMode(const IoDataFrame* data )
   }
 }
 
-void HandleResetConfig(const IoDataFrame* /*data*/ )
+void HandleResetConfig(const IoDataFrame * /*data*/)
 {
-
 }
 
-void HandleGetPinValue(const IoDataFrame* data )
+void HandleGetPinValue(const IoDataFrame *data)
 {
-  if(isReservedPin(data->pin))
+  if (isReservedPin(data->pin))
   {
     return;
   }
 
-  { 
+  {
     ScopedDisableInterrupt interruptScope;
-    notifyBuffer.push(GPIOValue({data->pin,getPinValueHelper(data->pin)}));
+    notifyBuffer.push(GPIOValue({data->pin, getPinValueHelper(data->pin)}));
   }
 }
 
-void HandlePulseOutputPin(const IoDataFrame* data)
+void HandlePulseOutputPin(const IoDataFrame *data)
 {
-    if(isReservedPin(data->pin))
-    {
-        return;
-    }
+  if (isReservedPin(data->pin))
+  {
+    return;
+  }
 
-    if(!isConfigured(data->pin))
-    {
-        return;
-    }
+  if (!isConfigured(data->pin))
+  {
+    return;
+  }
 
-    if(isInputPin(data->pin))
-    {
-        return;
-    }
+  if (isInputPin(data->pin))
+  {
+    return;
+  }
 
-    tsk::Task& task = timerArray[data->pin];
-    if(task.isEnabled())
-    {
-        return;
-    }
+  tsk::Task &task = timerArray[data->pin];
+  if (task.isEnabled())
+  {
+    return;
+  }
 
-    if(!isValidGPIOLevel(data->value))
-    {
-        return;
-    }
+  if (!isValidGPIOLevel(data->value))
+  {
+    return;
+  }
 
-    const IoOutputPulseDataFrame* pulseData =  reinterpret_cast<const IoOutputPulseDataFrame*>(data);
+  const IoOutputPulseDataFrame *pulseData = reinterpret_cast<const IoOutputPulseDataFrame *>(data);
 
-    uint8_t initValue = LOW;
-    tsk::TaskCallback cb =  NULL;
-    
-    if(data->value == LOW)
-    {
-        initValue = HIGH;
-        cb = timerHandlerTblHigh[data->pin];
-    }
-    else
-    {
-        initValue = LOW;
-        cb = timerHandlerTblLow[data->pin];
-    }
+  uint8_t initValue = LOW;
+  tsk::TaskCallback cb = NULL;
 
-    if(digitalRead(data->pin) != initValue)
-    {
-        digitalWrite(data->pin, initValue);
-    }
+  if (data->value == LOW)
+  {
+    initValue = HIGH;
+    cb = timerHandlerTblHigh[data->pin];
+  }
+  else
+  {
+    initValue = LOW;
+    cb = timerHandlerTblLow[data->pin];
+  }
 
-    HandleSetOutputPinImpl(data->pin, data->value);
-    task.setCallback(cb);
-    task.restartDelayed(pulseData->delay);
+  if (digitalRead(data->pin) != initValue)
+  {
+    digitalWrite(data->pin, initValue);
+  }
+
+  HandleSetOutputPinImpl(data->pin, data->value);
+  task.setCallback(cb);
+  task.restartDelayed(pulseData->delay);
 }
 
-void slipReadCallback(uint8_t * buff,uint8_t len)
-{ 
-  IoDataFrame* data = (IoDataFrame*) buff;
+void slipReadCallback(uint8_t *buff, uint8_t len)
+{
+  IoDataFrame *data = (IoDataFrame *)buff;
 
-  switch(data->command)
+  switch (data->command)
   {
-    case IoDataFrame::SET_OUTPUT_PIN_VALUE:
-      HandleSetOutputPin(data);
-      break;
-    case IoDataFrame::SET_PIN_MODE:
-      HandleSetPinMode(data);
-      break;
-    case IoDataFrame::GET_PIN_VALUE:
-      HandleGetPinValue(data);
-      break;
-    case IoDataFrame::ERASE_CONFIG:
-      HandleResetConfig(data);
-      break;
-    case IoDataFrame::SET_INPUT_PIN_DEBOUNCE:
-      HandleSetInputPinDebounce(data);
-      break;
-    case IoDataFrame::PULSE_OUTPUT_PIN:
-      HandlePulseOutputPin(data);
-      break;
-    case IoDataFrame::SET_INPUT_PIN_DEBOUNCE_MODE:
-      HandleSetInputPinDebounceMode(data);
-      break;
-    default:
-      break;
+  case IoDataFrame::SET_OUTPUT_PIN_VALUE:
+    HandleSetOutputPin(data);
+    break;
+  case IoDataFrame::SET_PIN_MODE:
+    HandleSetPinMode(data);
+    break;
+  case IoDataFrame::GET_PIN_VALUE:
+    HandleGetPinValue(data);
+    break;
+  case IoDataFrame::ERASE_CONFIG:
+    HandleResetConfig(data);
+    break;
+  case IoDataFrame::SET_INPUT_PIN_DEBOUNCE:
+    HandleSetInputPinDebounce(data);
+    break;
+  case IoDataFrame::PULSE_OUTPUT_PIN:
+    HandlePulseOutputPin(data);
+    break;
+  case IoDataFrame::SET_INPUT_PIN_DEBOUNCE_MODE:
+    HandleSetInputPinDebounceMode(data);
+    break;
+  default:
+    break;
   }
 }
 
@@ -569,21 +584,21 @@ bool checkPinChangeAndDebounceInterruptHandler(uint8_t pin)
 {
   uint8_t tmp = digitalRead(pin);
 
-  if(pinDebounceValueCfg[pin] == 0)
+  if (pinDebounceValueCfg[pin] == 0)
   {
-    notifyBuffer.push(GPIOValue({pin,tmp}));
+    notifyBuffer.push(GPIOValue({pin, tmp}));
     pinLastValue[pin] = tmp;
     pinLastChange[pin] = 0;
     return true;
   }
 
-  if(tmp == pinLastValue[pin])
+  if (tmp == pinLastValue[pin])
   {
     pinLastChange[pin] = 0;
     return true;
   }
 
-  if(pinLastChange[pin] < pinDebounceValueCfg[pin] )
+  if (pinLastChange[pin] < pinDebounceValueCfg[pin])
   {
     pinLastChange[pin] = 1;
     return true;
@@ -594,19 +609,19 @@ bool checkPinChangeAndDebounceInterruptHandler(uint8_t pin)
 
 bool checkPinChangeAndDebounceInterruptTimeout(uint8_t pin)
 {
-  if(pinLastChange[pin] == 0)
+  if (pinLastChange[pin] == 0)
   {
     return true;
   }
 
-  if(pinLastChange[pin] < pinDebounceValueCfg[pin] )
+  if (pinLastChange[pin] < pinDebounceValueCfg[pin])
   {
     pinLastChange[pin]++;
     return true;
   }
 
   uint8_t tmp = digitalRead(pin);
-  if(notifyBuffer.push(GPIOValue({pin,tmp})))
+  if (notifyBuffer.push(GPIOValue({pin, tmp})))
   {
     pinLastValue[pin] = tmp;
     pinLastChange[pin] = 0;
@@ -618,72 +633,72 @@ bool checkPinChangeAndDebounceInterruptTimeout(uint8_t pin)
 
 bool checkPinChangeAndDebounceIgnoreLevelInterruptHandler(uint8_t pin)
 {
-  if(pinDebounceValueCfg[pin] == 0)
+  if (pinDebounceValueCfg[pin] == 0)
   {
     return true;
   }
 
   uint8_t tmp = digitalRead(pin);
 
-  if(pinLastChange[pin] == 0)
+  if (pinLastChange[pin] == 0)
   {
-      if(tmp != pinLastValue[pin])
+    if (tmp != pinLastValue[pin])
+    {
+      if (notifyBuffer.push(GPIOValue({pin, HIGH})))
       {
-          if(notifyBuffer.push(GPIOValue({pin,HIGH})))
-          {
-              pinLastValue[pin] = tmp;
-              pinLastChange[pin]++;
-              return true;
-          }
+        pinLastValue[pin] = tmp;
+        pinLastChange[pin]++;
+        return true;
       }
+    }
   }
   else
   {
     pinLastChange[pin] = 1;
-    pinLastValue[pin] = tmp;   
+    pinLastValue[pin] = tmp;
   }
   return false;
 }
 
 bool checkPinChangeAndDebounceIgnoreLevelInterruptTimeout(uint8_t pin)
 {
-  if(pinLastChange[pin] == 0)
+  if (pinLastChange[pin] == 0)
   {
     return true;
   }
 
-  if(pinLastChange[pin] < pinDebounceValueCfg[pin] )
+  if (pinLastChange[pin] < pinDebounceValueCfg[pin])
   {
     pinLastChange[pin]++;
     return true;
   }
 
-  if(notifyBuffer.push(GPIOValue({pin,LOW})))
+  if (notifyBuffer.push(GPIOValue({pin, LOW})))
   {
-      pinLastValue[pin] = digitalRead(pin);
-      pinLastChange[pin] = 0;
-      return true;
+    pinLastValue[pin] = digitalRead(pin);
+    pinLastChange[pin] = 0;
+    return true;
   }
-    
+
   return false;
 }
 
 bool checkPinChangeAndDebounce(uint8_t pin)
 {
   uint8_t tmp = digitalRead(pin);
-  if(tmp == pinLastValue[pin])
+  if (tmp == pinLastValue[pin])
   {
     pinLastChange[pin] = 0;
     return true;
   }
 
-  if(pinLastChange[pin] < pinDebounceValueCfg[pin] )
+  if (pinLastChange[pin] < pinDebounceValueCfg[pin])
   {
     pinLastChange[pin]++;
     return true;
   }
 
-  if(notifyBuffer.push(GPIOValue({pin,tmp})))
+  if (notifyBuffer.push(GPIOValue({pin, tmp})))
   {
     pinLastValue[pin] = tmp;
     pinLastChange[pin] = 0;
@@ -695,42 +710,42 @@ bool checkPinChangeAndDebounce(uint8_t pin)
 
 bool checkPinChangeAndDebounceIgnoreLevel(uint8_t pin)
 {
-    uint8_t tmp = digitalRead(pin);
+  uint8_t tmp = digitalRead(pin);
 
-    if(pinLastChange[pin] == 0)
+  if (pinLastChange[pin] == 0)
+  {
+    if (tmp != pinLastValue[pin])
     {
-        if(tmp != pinLastValue[pin])
-        {
-            if(notifyBuffer.push(GPIOValue({pin,HIGH})))
-            {
-                pinLastValue[pin] = tmp;
-                pinLastChange[pin]++;
-                return true;
-            }
-        }
+      if (notifyBuffer.push(GPIOValue({pin, HIGH})))
+      {
+        pinLastValue[pin] = tmp;
+        pinLastChange[pin]++;
+        return true;
+      }
+    }
+  }
+  else
+  {
+    if (tmp != pinLastValue[pin])
+    {
+      pinLastChange[pin] = 1;
+      pinLastValue[pin] = tmp;
     }
     else
     {
-        if(tmp != pinLastValue[pin])
+      pinLastChange[pin]++;
+      if (pinLastChange[pin] >= pinDebounceValueCfg[pin])
+      {
+        if (notifyBuffer.push(GPIOValue({pin, LOW})))
         {
-            pinLastChange[pin] = 1;
-            pinLastValue[pin] = tmp;
+          pinLastValue[pin] = tmp;
+          pinLastChange[pin] = 0;
+          return true;
         }
-        else
-        {
-            pinLastChange[pin]++;
-            if(pinLastChange[pin] >= pinDebounceValueCfg[pin])
-            {
-                if(notifyBuffer.push(GPIOValue({pin,LOW})))
-                {
-                    pinLastValue[pin] = tmp;
-                    pinLastChange[pin] = 0;
-                    return true;
-                }
-            }
-        }
+      }
     }
-    return false;
+  }
+  return false;
 }
 
 void taskReadInputPin();
@@ -742,69 +757,68 @@ void taskReportPin();
 tsk::Task t1(INPUT_POLL_INTERVAL, TASK_FOREVER, &taskReadInputPin);
 tsk::Task t2(0, TASK_FOREVER, &taskNotifyIOChange);
 tsk::Task t3(0, TASK_FOREVER, &taskProcessSlip);
-tsk::Task t4(REQUEST_CONFIG_INTERVAL_PER_PIN, NUM_DIGITAL_PINS*3, &taskStartUp);
+tsk::Task t4(REQUEST_CONFIG_INTERVAL_PER_PIN, NUM_DIGITAL_PINS * 3, &taskStartUp);
 tsk::Task t5(INPUT_REPORT_INTERVAL, TASK_FOREVER, &taskReportPin);
 
 void taskReadInputPin()
 {
-  for(uint8_t j = 0; j < NUM_DIGITAL_PINS; j ++)
+  for (uint8_t j = 0; j < NUM_DIGITAL_PINS; j++)
   {
-    if(isReservedPin(j))
+    if (isReservedPin(j))
     {
       continue;
     }
 
-    if(!isInputPin(j))
+    if (!isInputPin(j))
     {
       continue;
     }
 
-    if(!timeoutHandlerMap[!isNormalDebounce(j)][j]())
+    if (!timeoutHandlerMap[!isNormalDebounce(j)][j]())
     {
       break;
     }
-
   }
 }
 
 void taskNotifyIOChange()
 {
-  for(uint8_t i = 0; i < MAX_QUEUE_SIZE; i ++)
+  for (uint8_t i = 0; i < MAX_QUEUE_SIZE; i++)
   {
     GPIOValue value;
     {
       ScopedDisableInterrupt interruptScope;
-      if(!notifyBuffer.pop(value))
+      if (!notifyBuffer.pop(value))
       {
         break;
       }
     }
 
     delayMicroseconds(100);
-    IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE,value});
-    slip.sendpacket((uint8_t*)&data, sizeof(data));
+    IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE, value});
+    slip.sendpacket((uint8_t *)&data, sizeof(data));
     pinLastValueReported[value.pin] = 0;
   }
 }
 
 void taskReportPin()
 {
-  for(uint8_t j = 0; j < NUM_DIGITAL_PINS; j ++)
+  for (uint8_t j = 0; j < NUM_DIGITAL_PINS; j++)
   {
-    if(isReservedPin(j))
+    if (isReservedPin(j))
     {
       continue;
     }
 
-    if(!isConfigured(j))
+    if (!isConfigured(j))
     {
       continue;
     }
 
-    if(pinLastValueReported[j] < 60)
+    if (pinLastValueReported[j] < 60)
     {
-        pinLastValueReported[j]++;
-        continue;
+      pinLastValueReported[j]++;
+      continue;
     }
 
     uint8_t value = LOW;
@@ -814,8 +828,8 @@ void taskReportPin()
       pinLastValueReported[j] = 0;
     }
 
-    IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE,GPIOValue(j,value)});
-    slip.sendpacket((uint8_t*)&data, sizeof(data));
+    IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE, GPIOValue(j, value)});
+    slip.sendpacket((uint8_t *)&data, sizeof(data));
     delayMicroseconds(100);
   }
 }
@@ -829,16 +843,17 @@ void taskStartUp()
 {
   static uint8_t j = 0;
   uint8_t ndx = j++ % NUM_DIGITAL_PINS;
-  if(isConfigured(ndx))
+  if (isConfigured(ndx))
   {
     return;
   }
- 
-  IoDataFrame data({IoDataFrame::REQUEST_CONFIGURATION,ndx,0});
-  slip.sendpacket((uint8_t*)&data, sizeof(data));
+
+  IoDataFrame data({IoDataFrame::REQUEST_CONFIGURATION, ndx, 0});
+  slip.sendpacket((uint8_t *)&data, sizeof(data));
 }
 
-void setup() {
+void setup()
+{
   //Serial.begin(115200);
 
   Serial1.begin(9600);
@@ -860,6 +875,7 @@ void setup() {
 }
 
 // the loop function runs over and over again forever
-void loop() {
+void loop()
+{
   runner.execute();
 }
