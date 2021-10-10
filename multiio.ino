@@ -410,19 +410,14 @@ void HandleSetPinMode(const IoDataFrame* data )
 
     pinLastValue[data->pin] = digitalRead(data->pin);
     pinLastChange[data->pin] = 0; 
-    configureInterrupt<useInterrupt>(data->pin);
     setPinConfig(data->pin, data->value);
+    configureInterrupt<useInterrupt>(data->pin);
   }
 }
 
 void HandleSetInputPinDebounce(const IoDataFrame* data )
 {
   if(isReservedPin(data->pin))
-  {
-    return;
-  }
-
-  if(!isInputPin(data->pin))
   {
     return;
   }
@@ -438,11 +433,6 @@ void HandleSetInputPinDebounce(const IoDataFrame* data )
 void HandleSetInputPinDebounceMode(const IoDataFrame* data )
 {
   if(isReservedPin(data->pin))
-  {
-    return;
-  }
-
-  if(!isInputPin(data->pin))
   {
     return;
   }
@@ -651,7 +641,6 @@ bool checkPinChangeAndDebounceIgnoreLevelInterruptHandler(uint8_t pin)
 
 bool checkPinChangeAndDebounceIgnoreLevelInterruptTimeout(uint8_t pin)
 {
-
   if(pinLastChange[pin] == 0)
   {
     return true;
@@ -662,7 +651,7 @@ bool checkPinChangeAndDebounceIgnoreLevelInterruptTimeout(uint8_t pin)
     pinLastChange[pin]++;
     return true;
   }
-  
+
   if(notifyBuffer.push(GPIOValue({pin,LOW})))
   {
       pinLastValue[pin] = digitalRead(pin);
@@ -750,48 +739,6 @@ tsk::Task t3(0, TASK_FOREVER, &taskProcessSlip);
 tsk::Task t4(350, NUM_DIGITAL_PINS*3, &taskStartUp);
 tsk::Task t5(5000, TASK_FOREVER, &taskReportPin);
 
-/*template<bool b>
-bool taskReadInputPinImp(uint8_t pin)
-{
-  if(pinDebounceModeCfg[pin] == DEBOUNCE_NORMAL)
-  {
-      if(!checkPinChangeAndDebounceInterruptTimeout(pin))
-      {
-          return false;
-      }
-  }
-  else
-  {
-      if(!checkPinChangeAndDebounceIgnoreLevelInterruptTimeout(pin))
-      {
-          return false;
-      }
-  }
-
-  return true;
-}
-
-template<>
-bool taskReadInputPinImp<false>(uint8_t pin)
-{
-  if(pinDebounceModeCfg[pin] == DEBOUNCE_NORMAL)
-  {
-      if(!checkPinChangeAndDebounce(pin))
-      {
-          return false;
-      }
-  }
-  else
-  {
-      if(!checkPinChangeAndDebounceIgnoreLevel(pin))
-      {
-          return false;
-      }
-  }
-
-  return true;
-}*/
-
 void taskReadInputPin()
 {
   for(uint8_t j = 0; j < NUM_DIGITAL_PINS; j ++)
@@ -806,28 +753,7 @@ void taskReadInputPin()
       continue;
     }
 
-    /*if(!taskReadInputPinImp<useInterrupt>(j))
-    {
-      break;
-    }
-
-    if(pinDebounceModeCfg[j] == DEBOUNCE_NORMAL)
-    {
-      if(!timeoutNormalHandlerTbl[j]())
-      {
-        break;
-      }
-    }
-    else
-    {
-      if(!timeoutIgnoreLevelHandlerTbl[j]())
-      {
-        break;
-      }
-    }*/
-
-
-    if(!timeoutHandlerMap[pinDebounceModeCfg[j] == DEBOUNCE_NORMAL][j]())
+    if(!timeoutHandlerMap[pinDebounceModeCfg[j] != DEBOUNCE_NORMAL][j]())
     {
       break;
     }
@@ -917,7 +843,7 @@ void taskStartUp()
 }
 
 void setup() {
-  //Serial.begin(115200);
+  Serial.begin(115200);
 
   Serial1.begin(9600);
   slip.setCallback(slipReadCallback);
