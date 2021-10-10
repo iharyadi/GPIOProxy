@@ -158,7 +158,7 @@ uint8_t inline getPinConfig(uint8_t pin)
   return pinCfg[pin];
 }
 
-bool isValidGPIOLevel(uint8_t level)
+bool inline isValidGPIOLevel(uint8_t level)
 {
   return level == HIGH || level == LOW;
 }
@@ -168,6 +168,17 @@ bool isValidGPIOMode(uint8_t mode)
   return mode == INPUT || mode == INPUT_PULLUP || mode == OUTPUT || mode == UNCONFIGURED;
 }
 
+bool inline isNormalDebounce(uint8_t pin)
+{
+  return pinDebounceModeCfg[pin] == DEBOUNCE_NORMAL;
+}
+
+uint8_t inline getPinValueHelper(uint8_t pin)
+{
+  return (isInputPin(pin) && !isNormalDebounce(pin)) ? 
+    (pinLastChange[pin] == 0) ? LOW:HIGH : 
+    digitalRead(pin);
+}
 
 #if defined(ARDUINO_AVR_LARDU_328E)
 SoftwareSerial Serial1(4, 5);
@@ -358,7 +369,7 @@ void configureInterrupt(uint8_t pin)
 {
   if(isInputPin(pin))
   {
-    if(pinDebounceModeCfg[pin] == DEBOUNCE_NORMAL)
+    if(isNormalDebounce(pin))
     {
       attachInterrupt(digitalPinToInterrupt(pin), intNormalHandlerTbl[pin],CHANGE);
     }
@@ -458,19 +469,10 @@ void HandleGetPinValue(const IoDataFrame* data )
     return;
   }
 
-  uint8_t value = LOW;
-  ScopedDisableInterrupt interruptScope;
-  if(isInputPin(data->pin) && (pinDebounceModeCfg[data->pin] != DEBOUNCE_NORMAL))
-  {
-    value = (pinLastChange[data->pin] == 0) ? LOW:HIGH;
+  { 
+    ScopedDisableInterrupt interruptScope;
+    notifyBuffer.push(GPIOValue({data->pin,getPinValueHelper(data->pin)}));
   }
-  else
-  {
-    value = digitalRead(data->pin);
-  }
-  
-  notifyBuffer.push(GPIOValue({data->pin,value}));
-
 }
 
 void HandlePulseOutputPin(const IoDataFrame* data)
@@ -753,7 +755,7 @@ void taskReadInputPin()
       continue;
     }
 
-    if(!timeoutHandlerMap[pinDebounceModeCfg[j] != DEBOUNCE_NORMAL][j]())
+    if(!timeoutHandlerMap[!isNormalDebounce(j)][j]())
     {
       break;
     }
@@ -802,19 +804,9 @@ void taskReportPin()
     }
 
     uint8_t value = LOW;
-
     {
       ScopedDisableInterrupt interruptScope;
-
-      if(isInputPin(j) && pinDebounceModeCfg[j] != DEBOUNCE_NORMAL)
-      {
-          value = (pinLastChange[j] == 0) ? LOW:HIGH;
-      }
-      else
-      {
-          value = digitalRead(j);
-      }
-
+      value = getPinValueHelper(j);
       pinLastValueReported[j] = 0;
     }
 
@@ -843,7 +835,7 @@ void taskStartUp()
 }
 
 void setup() {
-  Serial.begin(115200);
+  //Serial.begin(115200);
 
   Serial1.begin(9600);
   slip.setCallback(slipReadCallback);
