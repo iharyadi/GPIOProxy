@@ -356,21 +356,21 @@ void HandleSetOutputPinImpl(uint8_t pin, uint8_t value)
 template<bool b>
 void configureInterrupt(uint8_t pin)
 {
-  ScopedDisableInterrupt interruptScope;
-
-  attachInterrupt(digitalPinToInterrupt(pin), NULL,CHANGE);
-
-  pinLastValue[pin] = digitalRead(pin);
-  pinLastChange[pin] = 0;
-
-  if(pinDebounceModeCfg[pin] == DEBOUNCE_NORMAL)
+  if(isInputPin(pin))
   {
-    attachInterrupt(digitalPinToInterrupt(pin), intNormalHandlerTbl[pin],CHANGE);
+    if(pinDebounceModeCfg[pin] == DEBOUNCE_NORMAL)
+    {
+      attachInterrupt(digitalPinToInterrupt(pin), intNormalHandlerTbl[pin],CHANGE);
+    }
+    else
+    {
+      attachInterrupt(digitalPinToInterrupt(pin), intIgnoreLevelHandlerTbl[pin],CHANGE);
+    }
   }
   else
   {
-    attachInterrupt(digitalPinToInterrupt(pin), intIgnoreLevelHandlerTbl[pin],CHANGE);
-  } 
+    attachInterrupt(digitalPinToInterrupt(pin), NULL,CHANGE);
+  }
 }
 
 template<>
@@ -396,17 +396,23 @@ void HandleSetPinMode(const IoDataFrame* data )
     return;
   }
 
-  if(data->value == UNCONFIGURED)
   {
-    pinMode(data->pin,INPUT);
-  }
-  else
-  {
-    pinMode(data->pin,data->value);
-  }
+    ScopedDisableInterrupt interruptScope;
 
-  configureInterrupt<useInterrupt>(data->pin);
-  setPinConfig(data->pin, data->value);
+    if(data->value == UNCONFIGURED)
+    {
+      pinMode(data->pin,INPUT);
+    }
+    else
+    {
+      pinMode(data->pin,data->value);
+    }
+
+    pinLastValue[data->pin] = digitalRead(data->pin);
+    pinLastChange[data->pin] = 0; 
+    configureInterrupt<useInterrupt>(data->pin);
+    setPinConfig(data->pin, data->value);
+  }
 }
 
 void HandleSetInputPinDebounce(const IoDataFrame* data )
@@ -441,11 +447,13 @@ void HandleSetInputPinDebounceMode(const IoDataFrame* data )
     return;
   }
 
-  ScopedDisableInterrupt interruptScope;
-  pinDebounceModeCfg[data->pin] = data->value;
-  pinLastValue[data->pin] = digitalRead(data->pin);
-  pinLastChange[data->pin] = 0;
-  configureInterrupt<useInterrupt>(data->pin);
+  {
+    ScopedDisableInterrupt interruptScope;
+    pinDebounceModeCfg[data->pin] = data->value;
+    pinLastValue[data->pin] = digitalRead(data->pin);
+    pinLastChange[data->pin] = 0;
+    configureInterrupt<useInterrupt>(data->pin);
+  }
 }
 
 void HandleResetConfig(const IoDataFrame* /*data*/ )
