@@ -13,6 +13,10 @@
 #define UNCONFIGURED 0xFF
 
 #define INPUT_POLL_INTERVAL 1
+#define INPUT_REPORT_INTERVAL 5000
+#define REQUEST_CONFIG_INTERVAL_PER_PIN 350
+#define REQUEST_CONFIG_DELAY 10000
+
 #define DEFAULT_INPUT_DEBOUNCE 3 
 
 #define DEBOUNCE_NORMAL 0 
@@ -738,8 +742,8 @@ void taskReportPin();
 tsk::Task t1(INPUT_POLL_INTERVAL, TASK_FOREVER, &taskReadInputPin);
 tsk::Task t2(0, TASK_FOREVER, &taskNotifyIOChange);
 tsk::Task t3(0, TASK_FOREVER, &taskProcessSlip);
-tsk::Task t4(350, NUM_DIGITAL_PINS*3, &taskStartUp);
-tsk::Task t5(5000, TASK_FOREVER, &taskReportPin);
+tsk::Task t4(REQUEST_CONFIG_INTERVAL_PER_PIN, NUM_DIGITAL_PINS*3, &taskStartUp);
+tsk::Task t5(INPUT_REPORT_INTERVAL, TASK_FOREVER, &taskReportPin);
 
 void taskReadInputPin()
 {
@@ -851,7 +855,7 @@ void setup() {
   t2.enable();
   t3.enable();
   t4.enable();
-  t4.delay(10000);
+  t4.delay(REQUEST_CONFIG_DELAY);
   t5.enable();
 }
 
