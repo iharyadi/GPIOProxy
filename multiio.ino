@@ -1,8 +1,11 @@
 #include <RingBuf.h>
 
+namespace tsk
+{
 #include <TaskScheduler.h>
 #include <TaskSchedulerDeclarations.h>
 #include <TaskSchedulerSleepMethods.h>
+}
 
 #include <slip.h>
 
@@ -545,7 +548,7 @@ void HandlePulseOutputPin(const IoDataFrame *data)
 
   HandleSetOutputPinImpl(data->pin, data->value);
   task.set(pulseData->delay,TASK_ONCE,cb);
-  task.restartDelayed(pulseData->delay);
+  task.restartDelayed();
 }
 
 void slipReadCallback(uint8_t *buff, uint8_t len)
