@@ -23,7 +23,7 @@
 #define DEBOUNCE_IGNORE_LEVEL 1
 #define DEFAULT_DEBOUNCE_MODE DEBOUNCE_NORMAL
 
-#define MAX_QUEUE_SIZE 5
+#define MAX_QUEUE_SIZE 10
 
 #if defined(ARDUINO_SAM_DUE)
 constexpr bool useInterrupt = true;
@@ -511,13 +511,13 @@ void HandlePulseOutputPin(const IoDataFrame *data)
     return;
   }
 
-  tsk::Task &task = timerArray[data->pin];
-  if (task.isEnabled())
+  if (!isValidGPIOLevel(data->value))
   {
     return;
   }
 
-  if (!isValidGPIOLevel(data->value))
+  tsk::Task &task = timerArray[data->pin];
+  if (task.isEnabled())
   {
     return;
   }
@@ -544,7 +544,7 @@ void HandlePulseOutputPin(const IoDataFrame *data)
   }
 
   HandleSetOutputPinImpl(data->pin, data->value);
-  task.setCallback(cb);
+  task.set(pulseData->delay,TASK_ONCE,cb);
   task.restartDelayed(pulseData->delay);
 }
 
@@ -753,12 +753,14 @@ void taskNotifyIOChange();
 void taskProcessSlip();
 void taskStartUp();
 void taskReportPin();
+void taskReportPinStart();
 
 tsk::Task t1(INPUT_POLL_INTERVAL, TASK_FOREVER, &taskReadInputPin);
 tsk::Task t2(0, TASK_FOREVER, &taskNotifyIOChange);
-tsk::Task t3(0, TASK_FOREVER, &taskProcessSlip);
+tsk::Task t3(5, TASK_FOREVER, &taskProcessSlip);
 tsk::Task t4(REQUEST_CONFIG_INTERVAL_PER_PIN, NUM_DIGITAL_PINS * 3, &taskStartUp);
-tsk::Task t5(INPUT_REPORT_INTERVAL, TASK_FOREVER, &taskReportPin);
+tsk::Task t5(INPUT_REPORT_INTERVAL, TASK_FOREVER, &taskReportPinStart);
+tsk::Task t6(1, NUM_DIGITAL_PINS, &taskReportPin);
 
 void taskReadInputPin()
 {
@@ -783,55 +785,56 @@ void taskReadInputPin()
 
 void taskNotifyIOChange()
 {
-  for (uint8_t i = 0; i < MAX_QUEUE_SIZE; i++)
+  GPIOValue value;
   {
-    GPIOValue value;
+    ScopedDisableInterrupt interruptScope;
+    if (!notifyBuffer.pop(value))
     {
-      ScopedDisableInterrupt interruptScope;
-      if (!notifyBuffer.pop(value))
-      {
-        break;
-      }
+      return;
     }
-
-    delayMicroseconds(100);
-    IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE, value});
-    slip.sendpacket((uint8_t *)&data, sizeof(data));
-    pinLastValueReported[value.pin] = 0;
   }
+
+  delayMicroseconds(100);
+  IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE, value});
+  slip.sendpacket((uint8_t *)&data, sizeof(data));
+  pinLastValueReported[value.pin] = 0;
+}
+
+void taskReportPinStart()
+{
+  t5.restart();
 }
 
 void taskReportPin()
 {
-  for (uint8_t j = 0; j < NUM_DIGITAL_PINS; j++)
+  static uint8_t i = 0;
+  uint8_t ndx = i++ % NUM_DIGITAL_PINS;
+
+  if (isReservedPin(ndx))
   {
-    if (isReservedPin(j))
-    {
-      continue;
-    }
-
-    if (!isConfigured(j))
-    {
-      continue;
-    }
-
-    if (pinLastValueReported[j] < 60)
-    {
-      pinLastValueReported[j]++;
-      continue;
-    }
-
-    uint8_t value = LOW;
-    {
-      ScopedDisableInterrupt interruptScope;
-      value = getPinValueHelper(j);
-      pinLastValueReported[j] = 0;
-    }
-
-    IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE, GPIOValue(j, value)});
-    slip.sendpacket((uint8_t *)&data, sizeof(data));
-    delayMicroseconds(100);
+    return;
   }
+
+  if (!isConfigured(ndx))
+  {
+    return;
+  }
+
+  if (pinLastValueReported[ndx] < 60)
+  {
+    pinLastValueReported[ndx]++;
+    return;
+  }
+
+  uint8_t value = LOW;
+  {
+    ScopedDisableInterrupt interruptScope;
+    value = getPinValueHelper(ndx);
+    pinLastValueReported[ndx] = 0;
+  }
+
+  IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE, GPIOValue(ndx, value)});
+  slip.sendpacket((uint8_t *)&data, sizeof(data));
 }
 
 void taskProcessSlip()
@@ -866,6 +869,7 @@ void setup()
   runner.addTask(t3);
   runner.addTask(t4);
   runner.addTask(t5);
+  runner.addTask(t6);
   t1.enable();
   t2.enable();
   t3.enable();
