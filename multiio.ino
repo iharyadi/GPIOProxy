@@ -759,11 +759,11 @@ void taskReportPin();
 void taskReportPinStart();
 
 tsk::Task t1(INPUT_POLL_INTERVAL, TASK_FOREVER, &taskReadInputPin);
-tsk::Task t2(0, TASK_FOREVER, &taskNotifyIOChange);
+tsk::Task t2(1, TASK_FOREVER, &taskNotifyIOChange);
 tsk::Task t3(5, TASK_FOREVER, &taskProcessSlip);
 tsk::Task t4(REQUEST_CONFIG_INTERVAL_PER_PIN, NUM_DIGITAL_PINS * 3, &taskStartUp);
 tsk::Task t5(INPUT_REPORT_INTERVAL, TASK_FOREVER, &taskReportPinStart);
-tsk::Task t6(1, NUM_DIGITAL_PINS, &taskReportPin);
+tsk::Task t6(2, NUM_DIGITAL_PINS, &taskReportPin);
 
 void taskReadInputPin()
 {
@@ -805,13 +805,14 @@ void taskNotifyIOChange()
 
 void taskReportPinStart()
 {
-  t5.restart();
+  t6.restart();
 }
 
 void taskReportPin()
 {
-  static uint8_t i = 0;
-  uint8_t ndx = i++ % NUM_DIGITAL_PINS;
+  //static uint8_t i = 0;
+  //uint8_t ndx = i++ % NUM_DIGITAL_PINS;
+  uint8_t ndx = (uint8_t) t6.getIterations();
 
   if (isReservedPin(ndx))
   {
