@@ -316,16 +316,9 @@ static const HandlerTbl<NUM_DIGITAL_PINS, timeoutHandler<useInterrupt>::Normal>:
     timeoutNormalHandlerTbl.func_array,
     timeoutIgnoreLevelHandlerTbl.func_array};
 
-template <uint8_t N, uint8_t T>
-struct TimerArray : TimerArray<N - 1, T>
-{
-  TimerArray()
-  {
-  }
-};
 
 template <uint8_t T>
-struct TimerArray<0, T>
+struct TimerArray
 {
 private:
   tsk::Task* tasks[T] = {NULL};
@@ -347,7 +340,7 @@ public:
   TimerArray(){}
   ~TimerArray()
   {
-    for( int i = 0; i < T; i++)
+    for(int i = 0; i < T; i++)
     {
       if(tasks[i])
       {
@@ -359,7 +352,7 @@ public:
   tsk::Task& operator[](uint8_t ndx) { return GetTask(ndx); };
 };
 
-TimerArray<NUM_DIGITAL_PINS, NUM_DIGITAL_PINS> timerArray;
+TimerArray<NUM_DIGITAL_PINS> timerArray;
 
 void initializeIOConfig()
 {
