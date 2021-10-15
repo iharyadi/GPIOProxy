@@ -319,19 +319,44 @@ static const HandlerTbl<NUM_DIGITAL_PINS, timeoutHandler<useInterrupt>::Normal>:
 template <uint8_t N, uint8_t T>
 struct TimerArray : TimerArray<N - 1, T>
 {
-  tsk::Task task = {0, TASK_ONCE, timerHandlerTblHigh[N - 1], &runner, false, NULL, NULL};
   TimerArray()
   {
-    TimerArray<0, T>::tasks[N - 1] = &task;
   }
 };
 
 template <uint8_t T>
 struct TimerArray<0, T>
 {
-  tsk::Task *tasks[T];
+private:
+  tsk::Task* tasks[T] = {NULL};
 
-  tsk::Task &operator[](uint8_t ndx) { return *tasks[ndx]; };
+  tsk::Task& GetTask(uint8_t pin)
+  {
+    if(tasks[pin] != NULL)
+    {
+      return *tasks[pin];
+    }
+
+    tasks[pin] = new tsk::Task(0, TASK_ONCE, NULL,&runner,false);
+
+    return *tasks[pin];
+  }
+
+public:
+
+  TimerArray(){}
+  ~TimerArray()
+  {
+    for( int i = 0; i < T; i++)
+    {
+      if(tasks[i])
+      {
+        runner.deleteTask(*tasks[i]);
+      }
+    }
+  }
+
+  tsk::Task& operator[](uint8_t ndx) { return GetTask(ndx); };
 };
 
 TimerArray<NUM_DIGITAL_PINS, NUM_DIGITAL_PINS> timerArray;
