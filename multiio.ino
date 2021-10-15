@@ -19,6 +19,13 @@ namespace tsk
 #define INPUT_REPORT_INTERVAL 5000
 #define REQUEST_CONFIG_INTERVAL_PER_PIN 350
 #define REQUEST_CONFIG_DELAY 10000
+#if defined(ARDUINO_AVR_LARDU_328E)
+#define INPUT_REPORT_SPLIT_INTERVAL 10
+#define NOTIFY_PIN_STATUS_INTERVAL 5
+#else
+#define INPUT_REPORT_SPLIT_INTERVAL 5
+#define NOTIFY_PIN_STATUS_INTERVAL 0
+#endif
 
 #define DEFAULT_INPUT_DEBOUNCE 3
 
@@ -497,7 +504,7 @@ void HandleGetPinValue(const IoDataFrame *data)
   }
 }
 
-void HandlePulseOutputPin(const IoDataFrame *data)
+void HandlePulseOutputPin(IoOutputPulseDataFrame *data)
 {
   if (isReservedPin(data->pin))
   {
@@ -525,8 +532,6 @@ void HandlePulseOutputPin(const IoDataFrame *data)
     return;
   }
 
-  const IoOutputPulseDataFrame *pulseData = reinterpret_cast<const IoOutputPulseDataFrame *>(data);
-
   uint8_t initValue = LOW;
   tsk::TaskCallback cb = NULL;
 
@@ -547,36 +552,53 @@ void HandlePulseOutputPin(const IoDataFrame *data)
   }
 
   HandleSetOutputPinImpl(data->pin, data->value);
-  task.set(pulseData->delay,TASK_ONCE,cb);
+  task.set(data->delay,TASK_ONCE,cb);
   task.restartDelayed();
+}
+
+template<typename T> void HandlerInvoker(void (*handler)(T*),  uint8_t *buff, uint8_t len)
+{
+  if(sizeof(T) != len)
+  {
+    return;
+  }
+
+  T *data = reinterpret_cast<T*>(buff);
+
+  handler(data);
 }
 
 void slipReadCallback(uint8_t *buff, uint8_t len)
 {
+  if(len < sizeof(IoDataFrame))
+  {
+    return;
+  }
+
   IoDataFrame *data = (IoDataFrame *)buff;
 
   switch (data->command)
   {
   case IoDataFrame::SET_OUTPUT_PIN_VALUE:
-    HandleSetOutputPin(data);
+    HandlerInvoker(HandleSetOutputPin,buff,len);
     break;
   case IoDataFrame::SET_PIN_MODE:
-    HandleSetPinMode(data);
+    HandlerInvoker(HandleSetPinMode,buff,len);
     break;
   case IoDataFrame::GET_PIN_VALUE:
-    HandleGetPinValue(data);
+    HandlerInvoker(HandleGetPinValue,buff,len);
     break;
   case IoDataFrame::ERASE_CONFIG:
-    HandleResetConfig(data);
+    HandlerInvoker(HandleResetConfig,buff,len);
     break;
   case IoDataFrame::SET_INPUT_PIN_DEBOUNCE:
-    HandleSetInputPinDebounce(data);
+    HandlerInvoker(HandleSetInputPinDebounce,buff,len);
     break;
   case IoDataFrame::PULSE_OUTPUT_PIN:
-    HandlePulseOutputPin(data);
+    HandlerInvoker(HandlePulseOutputPin,buff,len);
     break;
   case IoDataFrame::SET_INPUT_PIN_DEBOUNCE_MODE:
-    HandleSetInputPinDebounceMode(data);
+    HandlerInvoker(HandleSetInputPinDebounceMode,buff,len);
     break;
   default:
     break;
@@ -759,11 +781,11 @@ void taskReportPin();
 void taskReportPinStart();
 
 tsk::Task t1(INPUT_POLL_INTERVAL, TASK_FOREVER, &taskReadInputPin);
-tsk::Task t2(1, TASK_FOREVER, &taskNotifyIOChange);
-tsk::Task t3(5, TASK_FOREVER, &taskProcessSlip);
+tsk::Task t2(NOTIFY_PIN_STATUS_INTERVAL, TASK_FOREVER, &taskNotifyIOChange);
+tsk::Task t3(0, TASK_FOREVER, &taskProcessSlip);
 tsk::Task t4(REQUEST_CONFIG_INTERVAL_PER_PIN, NUM_DIGITAL_PINS * 3, &taskStartUp);
 tsk::Task t5(INPUT_REPORT_INTERVAL, TASK_FOREVER, &taskReportPinStart);
-tsk::Task t6(2, NUM_DIGITAL_PINS, &taskReportPin);
+tsk::Task t6(INPUT_REPORT_SPLIT_INTERVAL, NUM_DIGITAL_PINS, &taskReportPin);
 
 void taskReadInputPin()
 {
@@ -810,8 +832,6 @@ void taskReportPinStart()
 
 void taskReportPin()
 {
-  //static uint8_t i = 0;
-  //uint8_t ndx = i++ % NUM_DIGITAL_PINS;
   uint8_t ndx = (uint8_t) t6.getIterations();
 
   if (isReservedPin(ndx))
@@ -848,8 +868,8 @@ void taskProcessSlip()
 
 void taskStartUp()
 {
-  static uint8_t j = 0;
-  uint8_t ndx = j++ % NUM_DIGITAL_PINS;
+  
+  uint8_t ndx = (uint8_t) (t4.getIterations() % NUM_DIGITAL_PINS);
   if (isConfigured(ndx))
   {
     return;
