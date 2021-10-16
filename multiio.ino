@@ -1,5 +1,9 @@
 #include <RingBuf.h>
 
+#if !defined(ARDUINO_SAM_DUE)
+#include <EEPROM.h>
+#endif
+
 namespace tsk
 {
 #include <TaskScheduler.h>
@@ -9,7 +13,7 @@ namespace tsk
 
 #include <slip.h>
 
-#if defined(ARDUINO_AVR_LARDU_328E)
+#if defined(ARDUINO_AVR_LARDU_328E)  || defined (ARDUINO_AVR_UNO )
 #include <SoftwareSerial.h>
 #endif
 
@@ -19,7 +23,7 @@ namespace tsk
 #define INPUT_REPORT_INTERVAL 5000
 #define REQUEST_CONFIG_INTERVAL_PER_PIN 350
 #define REQUEST_CONFIG_DELAY 10000
-#if defined(ARDUINO_AVR_LARDU_328E)
+#if defined(ARDUINO_AVR_LARDU_328E) || defined (ARDUINO_AVR_UNO )
 #define INPUT_REPORT_SPLIT_INTERVAL 10
 #define NOTIFY_PIN_STATUS_INTERVAL 5
 #else
@@ -37,8 +41,10 @@ namespace tsk
 
 #if defined(ARDUINO_SAM_DUE)
 constexpr bool useInterrupt = true;
+#define USE_EEPROM 0
 #define VOLATILE volatile
 #else
+#define USE_EEPROM 1
 constexpr bool useInterrupt = false;
 #define VOLATILE
 #endif
@@ -129,32 +135,150 @@ struct __attribute__((packed)) IoOutputPulseDataFrame : IoDataFrame
 
 RingBuf<GPIOValue, MAX_QUEUE_SIZE> notifyBuffer;
 
-static VOLATILE uint8_t pinCfg[NUM_DIGITAL_PINS];
-static VOLATILE uint8_t pinDebounceValueCfg[NUM_DIGITAL_PINS];
-static VOLATILE uint8_t pinDebounceModeCfg[NUM_DIGITAL_PINS];
-static VOLATILE uint8_t pinLastChange[NUM_DIGITAL_PINS];
-static VOLATILE uint8_t pinLastValue[NUM_DIGITAL_PINS];
-static uint8_t pinLastValueReported[NUM_DIGITAL_PINS];
-
 void HandleSetOutputPinImpl(uint8_t pin, uint8_t level);
 bool checkPinChangeAndDebounceIgnoreLevelInterruptHandler(uint8_t pin);
 bool checkPinChangeAndDebounceIgnoreLevelInterruptTimeout(uint8_t pin);
 bool checkPinChangeAndDebounceInterruptHandler(uint8_t pin);
 bool checkPinChangeAndDebounceInterruptTimeout(uint8_t pin);
 
+bool inline isInputPin(uint8_t pin);
+bool inline isReservedPin(uint8_t pin);
+
+#if USE_EEPROM
+struct Configuration
+{
+
+private:
+  static const int STATUS_SIZE = 1;
+  template<int offset> struct EEPROM_WRAPPER
+  {
+    EERef operator []( int address)
+    {
+       return EEPROM[ address + offset + STATUS_SIZE ];
+    }
+  
+    void memset(uint8_t val,size_t s)
+    {
+      for (int index = 0 ; index < s ; index++) {
+        EEPROM[ index + offset + STATUS_SIZE ] = val;
+      }
+    }
+  };
+
+public:
+
+  EEPROM_WRAPPER<0> pinCfg;
+  EEPROM_WRAPPER<0+NUM_DIGITAL_PINS>   pinDebounceValueCfg;
+  EEPROM_WRAPPER<0+NUM_DIGITAL_PINS+NUM_DIGITAL_PINS> pinDebounceModeCfg;
+
+  VOLATILE uint8_t pinLastChange[NUM_DIGITAL_PINS];
+  VOLATILE uint8_t pinLastValue[NUM_DIGITAL_PINS];
+  uint8_t pinLastValueReported[NUM_DIGITAL_PINS];
+  
+  void begin()
+  {
+    if(EEPROM.length() == 0 || EEPROM[0] > 0)
+    {
+      pinDebounceValueCfg.memset(DEFAULT_INPUT_DEBOUNCE, NUM_DIGITAL_PINS);
+      pinDebounceModeCfg.memset(DEFAULT_DEBOUNCE_MODE, NUM_DIGITAL_PINS);
+      pinCfg.memset(UNCONFIGURED, NUM_DIGITAL_PINS);
+      EEPROM[0] = 0;
+    }
+
+    memset(const_cast<uint8_t *>(pinLastValue), 0, sizeof(pinLastValue));
+    memset(const_cast<uint8_t *>(pinLastValueReported), 0, sizeof(pinLastValueReported));
+    memset(const_cast<uint8_t *>(pinLastChange), HIGH, sizeof(pinLastChange));
+
+    for (uint8_t j = 0; j < NUM_DIGITAL_PINS; j++)
+    {
+      if (isReservedPin(j))
+      {
+        continue;
+      }
+
+      if(pinCfg[j] == UNCONFIGURED)
+      {
+        pinMode(j, INPUT);
+      }
+      else
+      {
+        pinMode(j, pinCfg[j]);
+      }
+    }
+  }
+
+  void reset()
+  {
+    pinDebounceValueCfg.memset(DEFAULT_INPUT_DEBOUNCE, NUM_DIGITAL_PINS);
+    pinDebounceModeCfg.memset(DEFAULT_DEBOUNCE_MODE, NUM_DIGITAL_PINS);
+    pinCfg.memset(UNCONFIGURED, NUM_DIGITAL_PINS);
+    EEPROM[0] = 0;
+  
+    for (uint8_t j = 0; j < NUM_DIGITAL_PINS; j++)
+    {
+      if (isReservedPin(j))
+      {
+        continue;
+      }
+
+      if(pinCfg[j] == UNCONFIGURED)
+      {
+        pinMode(j, INPUT);
+      }
+    }
+  }
+};
+#else //USE_EEPROM
+struct Configuration
+{
+  VOLATILE uint8_t pinCfg[NUM_DIGITAL_PINS];
+  VOLATILE uint8_t pinDebounceValueCfg[NUM_DIGITAL_PINS];
+  VOLATILE uint8_t pinDebounceModeCfg[NUM_DIGITAL_PINS];
+  VOLATILE uint8_t pinLastChange[NUM_DIGITAL_PINS];
+  VOLATILE uint8_t pinLastValue[NUM_DIGITAL_PINS];
+  uint8_t pinLastValueReported[NUM_DIGITAL_PINS];
+  
+  void begin()
+  {
+    reset();
+  }
+
+  void reset()
+  {
+    memset(const_cast<uint8_t *>(pinDebounceValueCfg), DEFAULT_INPUT_DEBOUNCE, sizeof(pinDebounceValueCfg));
+    memset(const_cast<uint8_t *>(pinDebounceModeCfg), DEFAULT_DEBOUNCE_MODE, sizeof(pinDebounceModeCfg));
+    memset(const_cast<uint8_t *>(pinCfg), UNCONFIGURED, sizeof(pinCfg));
+    memset(const_cast<uint8_t *>(pinLastValueReported), 0, sizeof(pinLastValueReported));
+    memset(const_cast<uint8_t *>(pinLastValue), 0, sizeof(pinLastValue));
+    memset(const_cast<uint8_t *>(pinLastChange), HIGH, sizeof(pinLastChange));
+
+    for (uint8_t j = 0; j < NUM_DIGITAL_PINS; j++)
+    {
+      if (isReservedPin(j))
+      {
+        continue;
+      }
+      pinMode(j, INPUT);
+    }
+  }
+};
+#endif //USE_EEPROM
+
+static Configuration config;
+
 bool inline isInputPin(uint8_t pin)
 {
-  return pinCfg[pin] == INPUT_PULLUP || pinCfg[pin] == INPUT;
+  return config.pinCfg[pin] == INPUT_PULLUP || config.pinCfg[pin] == INPUT;
 };
 
 bool inline isConfigured(uint8_t pin)
 {
-  return pinCfg[pin] != UNCONFIGURED;
+  return config.pinCfg[pin] != UNCONFIGURED;
 };
 
 bool inline isReservedPin(uint8_t pin)
 {
-#if defined(ARDUINO_AVR_LARDU_328E)
+#if defined(ARDUINO_AVR_LARDU_328E) || defined (ARDUINO_AVR_UNO )
   return pin == 0 || pin == 1 || pin == 4 || pin == 5 || pin >= NUM_DIGITAL_PINS;
 #else
   return pin == 0 || pin == 1 || pin == 18 || pin == 19 || pin >= NUM_DIGITAL_PINS;
@@ -163,12 +287,12 @@ bool inline isReservedPin(uint8_t pin)
 
 void inline setPinConfig(uint8_t pin, uint8_t mode)
 {
-  pinCfg[pin] = mode;
+  config.pinCfg[pin] = mode;
 }
 
 uint8_t inline getPinConfig(uint8_t pin)
 {
-  return pinCfg[pin];
+  return config.pinCfg[pin];
 }
 
 bool inline isValidGPIOLevel(uint8_t level)
@@ -183,15 +307,15 @@ bool isValidGPIOMode(uint8_t mode)
 
 bool inline isNormalDebounce(uint8_t pin)
 {
-  return pinDebounceModeCfg[pin] == DEBOUNCE_NORMAL;
+  return config.pinDebounceModeCfg[pin] == DEBOUNCE_NORMAL;
 }
 
 uint8_t inline getPinValueHelper(uint8_t pin)
 {
-  return (isInputPin(pin) && !isNormalDebounce(pin)) ? (pinLastChange[pin] == 0) ? LOW : HIGH : digitalRead(pin);
+  return (isInputPin(pin) && !isNormalDebounce(pin)) ? (config.pinLastChange[pin] == 0) ? LOW : HIGH : digitalRead(pin);
 }
 
-#if defined(ARDUINO_AVR_LARDU_328E)
+#if defined(ARDUINO_AVR_LARDU_328E) || defined (ARDUINO_AVR_UNO )
 SoftwareSerial Serial1(4, 5);
 SoftwareSlip slip(Serial1);
 #else
@@ -345,6 +469,21 @@ public:
       if(tasks[i])
       {
         runner.deleteTask(*tasks[i]);
+        delete tasks[i];
+        tasks[i] = NULL;
+      }
+    }
+  }
+
+  void clean()
+  {
+    for(int i = 0; i < T; i++)
+    {
+      if(tasks[i] && (config.pinCfg[i] == UNCONFIGURED || isInputPin(i)) )
+      {
+        runner.deleteTask(*tasks[i]);
+        delete tasks[i];
+        tasks[i] = NULL;
       }
     }
   }
@@ -353,24 +492,6 @@ public:
 };
 
 TimerArray<NUM_DIGITAL_PINS> timerArray;
-
-void initializeIOConfig()
-{
-  memset(const_cast<uint8_t *>(pinLastChange), HIGH, sizeof(pinLastChange));
-  memset(const_cast<uint8_t *>(pinDebounceValueCfg), DEFAULT_INPUT_DEBOUNCE, sizeof(pinDebounceValueCfg));
-  memset(const_cast<uint8_t *>(pinDebounceModeCfg), DEFAULT_DEBOUNCE_MODE, sizeof(pinDebounceModeCfg));
-  memset(const_cast<uint8_t *>(pinCfg), UNCONFIGURED, sizeof(pinCfg));
-  memset(const_cast<uint8_t *>(pinLastValueReported), 0, sizeof(pinLastValueReported));
-
-  for (uint8_t j = 0; j < NUM_DIGITAL_PINS; j++)
-  {
-    if (isReservedPin(j))
-    {
-      continue;
-    }
-    pinMode(j, INPUT);
-  }
-}
 
 void HandleSetOutputPin(const struct IoDataFrame *data)
 {
@@ -467,8 +588,8 @@ void HandleSetPinMode(const IoDataFrame *data)
       pinMode(data->pin, data->value);
     }
 
-    pinLastValue[data->pin] = digitalRead(data->pin);
-    pinLastChange[data->pin] = 0;
+    config.pinLastValue[data->pin] = digitalRead(data->pin);
+    config.pinLastChange[data->pin] = 0;
     setPinConfig(data->pin, data->value);
     configureInterrupt<useInterrupt>(data->pin);
   }
@@ -483,9 +604,9 @@ void HandleSetInputPinDebounce(const IoDataFrame *data)
 
   {
     ScopedDisableInterrupt interruptScope;
-    pinDebounceValueCfg[data->pin] = data->value;
-    pinLastValue[data->pin] = digitalRead(data->pin);
-    pinLastChange[data->pin] = 0;
+    config.pinDebounceValueCfg[data->pin] = data->value;
+    config.pinLastValue[data->pin] = digitalRead(data->pin);
+    config.pinLastChange[data->pin] = 0;
   }
 }
 
@@ -498,9 +619,9 @@ void HandleSetInputPinDebounceMode(const IoDataFrame *data)
 
   {
     ScopedDisableInterrupt interruptScope;
-    pinDebounceModeCfg[data->pin] = data->value;
-    pinLastValue[data->pin] = digitalRead(data->pin);
-    pinLastChange[data->pin] = 0;
+    config.pinDebounceModeCfg[data->pin] = data->value;
+    config.pinLastValue[data->pin] = digitalRead(data->pin);
+    config.pinLastChange[data->pin] = 0;
     configureInterrupt<useInterrupt>(data->pin);
   }
 }
@@ -627,23 +748,23 @@ bool checkPinChangeAndDebounceInterruptHandler(uint8_t pin)
 {
   uint8_t tmp = digitalRead(pin);
 
-  if (pinDebounceValueCfg[pin] == 0)
+  if (config.pinDebounceValueCfg[pin] == 0)
   {
     notifyBuffer.push(GPIOValue({pin, tmp}));
-    pinLastValue[pin] = tmp;
-    pinLastChange[pin] = 0;
+    config.pinLastValue[pin] = tmp;
+    config.pinLastChange[pin] = 0;
     return true;
   }
 
-  if (tmp == pinLastValue[pin])
+  if (tmp == config.pinLastValue[pin])
   {
-    pinLastChange[pin] = 0;
+    config.pinLastChange[pin] = 0;
     return true;
   }
 
-  if (pinLastChange[pin] < pinDebounceValueCfg[pin])
+  if (config.pinLastChange[pin] < config.pinDebounceValueCfg[pin])
   {
-    pinLastChange[pin] = 1;
+    config.pinLastChange[pin] = 1;
     return true;
   }
 
@@ -652,22 +773,22 @@ bool checkPinChangeAndDebounceInterruptHandler(uint8_t pin)
 
 bool checkPinChangeAndDebounceInterruptTimeout(uint8_t pin)
 {
-  if (pinLastChange[pin] == 0)
+  if (config.pinLastChange[pin] == 0)
   {
     return true;
   }
 
-  if (pinLastChange[pin] < pinDebounceValueCfg[pin])
+  if (config.pinLastChange[pin] < config.pinDebounceValueCfg[pin])
   {
-    pinLastChange[pin]++;
+    config.pinLastChange[pin]++;
     return true;
   }
 
   uint8_t tmp = digitalRead(pin);
   if (notifyBuffer.push(GPIOValue({pin, tmp})))
   {
-    pinLastValue[pin] = tmp;
-    pinLastChange[pin] = 0;
+    config.pinLastValue[pin] = tmp;
+    config.pinLastChange[pin] = 0;
     return true;
   }
 
@@ -676,50 +797,50 @@ bool checkPinChangeAndDebounceInterruptTimeout(uint8_t pin)
 
 bool checkPinChangeAndDebounceIgnoreLevelInterruptHandler(uint8_t pin)
 {
-  if (pinDebounceValueCfg[pin] == 0)
+  if (config.pinDebounceValueCfg[pin] == 0)
   {
     return true;
   }
 
   uint8_t tmp = digitalRead(pin);
 
-  if (pinLastChange[pin] == 0)
+  if (config.pinLastChange[pin] == 0)
   {
-    if (tmp != pinLastValue[pin])
+    if (tmp != config.pinLastValue[pin])
     {
       if (notifyBuffer.push(GPIOValue({pin, HIGH})))
       {
-        pinLastValue[pin] = tmp;
-        pinLastChange[pin]++;
+        config.pinLastValue[pin] = tmp;
+        config.pinLastChange[pin]++;
         return true;
       }
     }
   }
   else
   {
-    pinLastChange[pin] = 1;
-    pinLastValue[pin] = tmp;
+    config.pinLastChange[pin] = 1;
+    config.pinLastValue[pin] = tmp;
   }
   return false;
 }
 
 bool checkPinChangeAndDebounceIgnoreLevelInterruptTimeout(uint8_t pin)
 {
-  if (pinLastChange[pin] == 0)
+  if (config.pinLastChange[pin] == 0)
   {
     return true;
   }
 
-  if (pinLastChange[pin] < pinDebounceValueCfg[pin])
+  if (config.pinLastChange[pin] < config.pinDebounceValueCfg[pin])
   {
-    pinLastChange[pin]++;
+    config.pinLastChange[pin]++;
     return true;
   }
 
   if (notifyBuffer.push(GPIOValue({pin, LOW})))
   {
-    pinLastValue[pin] = digitalRead(pin);
-    pinLastChange[pin] = 0;
+    config.pinLastValue[pin] = digitalRead(pin);
+    config.pinLastChange[pin] = 0;
     return true;
   }
 
@@ -729,22 +850,22 @@ bool checkPinChangeAndDebounceIgnoreLevelInterruptTimeout(uint8_t pin)
 bool checkPinChangeAndDebounce(uint8_t pin)
 {
   uint8_t tmp = digitalRead(pin);
-  if (tmp == pinLastValue[pin])
+  if (tmp == config.pinLastValue[pin])
   {
-    pinLastChange[pin] = 0;
+    config.pinLastChange[pin] = 0;
     return true;
   }
 
-  if (pinLastChange[pin] < pinDebounceValueCfg[pin])
+  if (config.pinLastChange[pin] < config.pinDebounceValueCfg[pin])
   {
-    pinLastChange[pin]++;
+    config.pinLastChange[pin]++;
     return true;
   }
 
   if (notifyBuffer.push(GPIOValue({pin, tmp})))
   {
-    pinLastValue[pin] = tmp;
-    pinLastChange[pin] = 0;
+    config.pinLastValue[pin] = tmp;
+    config.pinLastChange[pin] = 0;
     return true;
   }
 
@@ -755,34 +876,34 @@ bool checkPinChangeAndDebounceIgnoreLevel(uint8_t pin)
 {
   uint8_t tmp = digitalRead(pin);
 
-  if (pinLastChange[pin] == 0)
+  if (config.pinLastChange[pin] == 0)
   {
-    if (tmp != pinLastValue[pin])
+    if (tmp != config.pinLastValue[pin])
     {
       if (notifyBuffer.push(GPIOValue({pin, HIGH})))
       {
-        pinLastValue[pin] = tmp;
-        pinLastChange[pin]++;
+        config.pinLastValue[pin] = tmp;
+        config.pinLastChange[pin]++;
         return true;
       }
     }
   }
   else
   {
-    if (tmp != pinLastValue[pin])
+    if (tmp != config.pinLastValue[pin])
     {
-      pinLastChange[pin] = 1;
-      pinLastValue[pin] = tmp;
+      config.pinLastChange[pin] = 1;
+      config.pinLastValue[pin] = tmp;
     }
     else
     {
-      pinLastChange[pin]++;
-      if (pinLastChange[pin] >= pinDebounceValueCfg[pin])
+      config.pinLastChange[pin]++;
+      if (config.pinLastChange[pin] >= config.pinDebounceValueCfg[pin])
       {
         if (notifyBuffer.push(GPIOValue({pin, LOW})))
         {
-          pinLastValue[pin] = tmp;
-          pinLastChange[pin] = 0;
+          config.pinLastValue[pin] = tmp;
+          config.pinLastChange[pin] = 0;
           return true;
         }
       }
@@ -840,11 +961,12 @@ void taskNotifyIOChange()
   delayMicroseconds(100);
   IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE, value});
   slip.sendpacket((uint8_t *)&data, sizeof(data));
-  pinLastValueReported[value.pin] = 0;
+  config.pinLastValueReported[value.pin] = 0;
 }
 
 void taskReportPinStart()
 {
+  timerArray.clean();
   t6.restart();
 }
 
@@ -862,9 +984,9 @@ void taskReportPin()
     return;
   }
 
-  if (pinLastValueReported[ndx] < 60)
+  if (config.pinLastValueReported[ndx] < 60)
   {
-    pinLastValueReported[ndx]++;
+    config.pinLastValueReported[ndx]++;
     return;
   }
 
@@ -872,7 +994,7 @@ void taskReportPin()
   {
     ScopedDisableInterrupt interruptScope;
     value = getPinValueHelper(ndx);
-    pinLastValueReported[ndx] = 0;
+    config.pinLastValueReported[ndx] = 0;
   }
 
   IoDataFrame data({IoDataFrame::REPORT_PIN_CURRENT_VALUE, GPIOValue(ndx, value)});
@@ -904,7 +1026,7 @@ void setup()
   Serial1.begin(9600);
   slip.setCallback(slipReadCallback);
 
-  initializeIOConfig();
+  config.begin();
 
   runner.addTask(t1);
   runner.addTask(t2);
