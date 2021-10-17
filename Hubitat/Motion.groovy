@@ -5,6 +5,17 @@ metadata {
         capability "Configuration"
         capability "Sensor"
     }
+    
+    preferences {
+        section("Setup")
+        {
+            input name:"reversePin", type: "bool", title: "Reverse Pin", description: "Reverse pin High/Low translation to Active/Inactive",
+                defaultValue: "false", displayDuringSetup: false 
+            
+            input name:"delay", type: "number", title: "Delay", description: "Delay event in seconds after inactivity",
+                defaultValue: 0, displayDuringSetup: false 
+        }
+    }
 }
 
 private short REPORT_PIN_CURRENT_VALUE()
@@ -47,10 +58,20 @@ private short REQUEST_CONFIGURATION()
     return 0x06   
 }
 
+private short SET_INPUT_PIN_DEBOUNCE()
+{
+    return 0x04   
+}
+
 private short getDevicePinNumber()
 {
     String devicePinNumber = device.getDataValue("pageNumber")
     return (short) devicePinNumber.toInteger();
+}
+
+def delayedInactiveEvent()
+{
+    sendEvent([name:"motion", value:"inactive"])
 }
 
 def parse(def data) { 
@@ -73,8 +94,26 @@ def parse(def data) {
     }
        
     short pinValue = (short) Long.parseLong(data[2], 16);
+    def event = null
     
-    return createEvent(name:"motion", value:(pinValue != LOW())?"active":"inactive")
+    if((pinValue != LOW()) ^ (boolean) reversePin)
+    {
+        unschedule(delayedInactiveEvent)
+        event = createEvent(name:"motion", value:"active")
+    }
+    else
+    {
+        if(delay && delay > 0)
+        {
+            runIn(delay, delayedInactiveEvent)
+        }
+        else
+        {
+            event = createEvent(name:"motion", value:"inactive")
+        }
+    }
+    
+    return event;
 }
 
 def configure_child() {
@@ -83,8 +122,11 @@ def configure_child() {
 def initialize() {
     byte[] setPinMode  = [SET_PIN_MODE(),getDevicePinNumber(),INPUT()];
     byte[] getpinvalue = [GET_PIN_VALUE(),getDevicePinNumber(),0];
+    byte[] setpindebounce = [SET_INPUT_PIN_DEBOUNCE(), getDevicePinNumber(),250]
     def cmd = []
     cmd += parent.sendToSerialdevice(setPinMode)  
+    cmd += "delay 50"
+    cmd += parent.sendToSerialdevice(setpindebounce)  
     cmd += "delay 50"
     cmd += parent.sendToSerialdevice(getpinvalue)    
     cmd += "delay 2000"
@@ -101,6 +143,7 @@ def configure()
 }
 
 def uninstalled() {
+    unschedule(delayedInactiveEvent)
     byte[] setPinMode = [SET_PIN_MODE(),getDevicePinNumber(),UNCONFIGURED()];
     def cmd = []
     cmd += parent.sendToSerialdevice(setPinMode)    

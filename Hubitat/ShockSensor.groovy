@@ -5,6 +5,18 @@ metadata {
         capability "Configuration"
         capability "Sensor"
     }
+    
+    preferences {
+    
+        section("Setup")
+        {
+            input name:"reversePin", type: "bool", title: "Reverse Pin", description: "Reverse pin High/Low translation to Active/Inactive",
+                defaultValue: "false", displayDuringSetup: false 
+            
+            input name:"delay", type: "number", title: "Delay", description: "Delay event in seconds after inactivity",
+                defaultValue: 0, displayDuringSetup: false 
+        }
+    }
 }
 
 private short REPORT_PIN_CURRENT_VALUE()
@@ -30,6 +42,11 @@ private short DEBOUNCE_IGNORE_LEVEL()
 private short LOW()
 {
     return 0;   
+}
+
+private short HIGH()
+{
+    return 1;   
 }
 
 private short INPUT()
@@ -63,10 +80,13 @@ private short getDevicePinNumber()
     return (short) devicePinNumber.toInteger();
 }
 
+def delayedInactiveEvent()
+{
+    sendEvent([name:"shock", value:"clear"])
+}
+
 def parse(def data) { 
-    
-    log.info "data $data"
-    
+        
     if(data[0].toInteger() == REQUEST_CONFIGURATION() )
     {
         initialize()
@@ -87,7 +107,26 @@ def parse(def data) {
        
     short pinValue = (short) Long.parseLong(data[2], 16);
     
-    return createEvent(name:"shock", value:(pinValue == LOW())?"clear":"detected")
+    def event = null
+    
+    if(pinValue == HIGH() ^ (boolean) reversePin)
+    {
+        unschedule(delayedInactiveEvent)
+        event = createEvent(name:"shock", value:"detected")
+    }
+    else
+    {
+        if(delay && delay > 0)
+        {
+            runIn(delay, delayedInactiveEvent)
+        }
+        else
+        {
+            event = createEvent(name:"shock", value:"clear")
+        }
+    }
+    
+    return event;
 }
 
 def configure_child() {
@@ -121,6 +160,7 @@ def configure()
 }
 
 def uninstalled() {
+    unschedule(delayedInactiveEvent)
     byte[] setPinMode = [SET_PIN_MODE(),getDevicePinNumber(),UNCONFIGURED()];
     def cmd = []
     cmd += parent.sendToSerialdevice(setPinMode)    

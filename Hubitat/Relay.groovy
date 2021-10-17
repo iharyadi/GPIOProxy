@@ -4,7 +4,13 @@ metadata {
         capability "Sensor"
         capability "Refresh"
         capability "Configuration"
-    }    
+    }  
+    
+    section("Setup")
+    {
+        input name:"reversePin", type: "bool", title: "Reverse Pin?", description: "Reverse pin High/Low translation to On/Off",
+            defaultValue: "false", displayDuringSetup: false 
+    }
 }
 
 private short LOW()
@@ -69,9 +75,7 @@ private short getDevicePinNumber()
 }
 
 def parse(def data) { 
-    
-    log.info "data $data"
-     
+         
     Integer page = zigbee.convertHexToInt(data[1])
     
     if(getDevicePinNumber() != page)
@@ -81,8 +85,7 @@ def parse(def data) {
     
     if(data[0].toInteger() == REQUEST_CONFIGURATION() )
     {
-        log.info "parse initialze ${state.last_request != null?(short)state.last_request:HIGH()}"
-        initialize(state.last_request!= null?(short)state.last_request:HIGH())
+        initialize(state.last_request!= null?(short)state.last_request:((boolean) reversePin ? HIGH() : LOW()))
         return null
     }
     
@@ -95,7 +98,7 @@ def parse(def data) {
     
     state.last_request = pinValue
      
-    return createEvent(name:"switch", value:(pinValue == LOW())?"on":"off")
+    return createEvent(name:"switch", value:(pinValue == HIGH() ^ (boolean) reversePin)?"on":"off")
 }
 
 def configure_child() {
@@ -111,13 +114,16 @@ private def setPin(short value)
 }
 
 def off() {
-    log.info "off called"
-    setPin(HIGH())
+    setPin((boolean) reversePin ? HIGH() : LOW())
 }
 
 def on() {
-    log.info "on called"
-    setPin(LOW())
+     setPin((boolean) reversePin ? LOW() : HIGH())
+}
+
+def updated()
+{
+    runIn(2,refresh);
 }
 
 def initialize(short val)
@@ -138,12 +144,12 @@ def initialize(short val)
 }
        
 def installed() {
-    initialize(HIGH())
+    initialize((boolean) reversePin ? HIGH() : LOW())
 }
 
 def configure()
 {
-    initialize(HIGH())
+    initialize((boolean) reversePin ? HIGH() : LOW())
 }
 
 def uninstalled() {

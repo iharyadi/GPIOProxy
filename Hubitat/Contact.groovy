@@ -1,9 +1,24 @@
 metadata {
     definition (name: "Contact", namespace: "iharyadi", author: "iharyadi") {
+        
+        singleThreaded: true
+        
         capability "ContactSensor"
         capability "Refresh"
         capability "Configuration"
         capability "Sensor"
+    }
+    
+    section("Setup")
+    {
+        input name:"reversePin", type: "bool", title: "Reverse Pin?", description: "Reverse pin High/Low translation to Active/Inactive",
+            defaultValue: "false", displayDuringSetup: false 
+            
+        input name:"useInternalPullup", type: "bool", title: "Internal Pullup?", description: "Do you want to use internal pull up?",
+            defaultValue: "false", displayDuringSetup: false 
+        
+        input name:"debouncePeriod", type: "number", title: "Debounce Period", description: "Set Debounce Period",
+            defaultValue: "250", displayDuringSetup: false 
     }
 }
 
@@ -15,6 +30,11 @@ private short REPORT_PIN_CURRENT_VALUE()
 private short LOW()
 {
     return 0;   
+}
+
+private short INPUT()
+{
+   return 0x00;   
 }
 
 private short INPUT_PULLUP()
@@ -30,6 +50,11 @@ private short UNCONFIGURED()
 private short SET_PIN_MODE()
 {
     return 0x03   
+}
+
+private short SET_INPUT_PIN_DEBOUNCE()
+{
+    return 0x04   
 }
 
 private short GET_PIN_VALUE()
@@ -69,28 +94,36 @@ def parse(def data) {
        
     short pinValue = (short) Long.parseLong(data[2], 16);
     
-    return createEvent(name:"contact", value:(pinValue != LOW())?"open":"closed")
+    return createEvent(name:"contact", value:(pinValue != LOW() ^ (boolean) reversePin )?"open":"closed")
 }
 
 def configure_child() {
 }
 
 def initialize() {
-    byte[] setPinMode  = [SET_PIN_MODE(),getDevicePinNumber(),INPUT_PULLUP()];
+    byte[] setPinMode  = [SET_PIN_MODE(),getDevicePinNumber(), (boolean) useInternalPullup ? INPUT_PULLUP() : INPUT()];
     byte[] getpinvalue = [GET_PIN_VALUE(),getDevicePinNumber(),0];
+    byte[] setpindebounce = [SET_INPUT_PIN_DEBOUNCE(), getDevicePinNumber(), debouncePeriod ? (short)debouncePeriod.toInteger():250]
     def cmd = []
     cmd += parent.sendToSerialdevice(setPinMode)  
+    cmd += "delay 50"
+    cmd += parent.sendToSerialdevice(setpindebounce)  
     cmd += "delay 50"
     cmd += parent.sendToSerialdevice(getpinvalue)    
     cmd += "delay 2000"
     parent.sendCommandP(cmd) 
 }
 
-def installed() {
+void installed() {
     initialize() 
 }
 
 def configure()
+{
+    initialize();   
+}
+
+void updated()
 {
     initialize();   
 }

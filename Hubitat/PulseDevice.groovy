@@ -6,6 +6,17 @@ metadata {
         capability "Refresh"
         capability "Configuration"
     }
+    
+    preferences {
+        section("Setup")
+        {
+            input name:"pulseLevel", type: "bool", title: "Pulse Level High?", description: "Is it low to high pulse?",
+                defaultValue: "true", displayDuringSetup: false 
+            
+            input name:"pulseWidth", type: "number", title: "Pulse Width", description: "Length of the pulse in milliseconds",
+                defaultValue: 0, displayDuringSetup: false 
+        }
+    }
 }
 
 private short LOW()
@@ -142,7 +153,12 @@ def off() {
 }
 
 def on() {
-    sendPulse(HIGH(),5)
+    if(pulseWidth == null || pulseWidth == 0)
+    {
+        return    
+    }
+    
+    sendPulse((pulseLevel == null || pulseLevel) ? HIGH(): LOW(),(short) pulseWidth)
 }
 
 def initialize(short val)
