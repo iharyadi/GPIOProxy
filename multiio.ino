@@ -43,6 +43,10 @@ namespace tsk
 constexpr bool useInterrupt = true;
 #define USE_EEPROM 0
 #define VOLATILE volatile
+#elif defined(ARDUINO_AVR_LARDU_328E)
+#define USE_EEPROM 0
+constexpr bool useInterrupt = false;
+#define VOLATILE
 #else
 #define USE_EEPROM 1
 constexpr bool useInterrupt = false;
@@ -919,12 +923,12 @@ void taskStartUp();
 void taskReportPin();
 void taskReportPinStart();
 
-tsk::Task t1(INPUT_POLL_INTERVAL, TASK_FOREVER, &taskReadInputPin);
-tsk::Task t2(NOTIFY_PIN_STATUS_INTERVAL, TASK_FOREVER, &taskNotifyIOChange);
-tsk::Task t3(0, TASK_FOREVER, &taskProcessSlip);
-tsk::Task t4(REQUEST_CONFIG_INTERVAL_PER_PIN, NUM_DIGITAL_PINS * 3, &taskStartUp);
-tsk::Task t5(INPUT_REPORT_INTERVAL, TASK_FOREVER, &taskReportPinStart);
-tsk::Task t6(INPUT_REPORT_SPLIT_INTERVAL, NUM_DIGITAL_PINS, &taskReportPin);
+tsk::Task t1(INPUT_POLL_INTERVAL, TASK_FOREVER, &taskReadInputPin,&runner,false);
+tsk::Task t2(NOTIFY_PIN_STATUS_INTERVAL, TASK_FOREVER, &taskNotifyIOChange,&runner,false);
+tsk::Task t3(0, TASK_FOREVER, &taskProcessSlip,&runner,false);
+tsk::Task t4(REQUEST_CONFIG_INTERVAL_PER_PIN, NUM_DIGITAL_PINS * 3, &taskStartUp,&runner,false);
+tsk::Task t5(INPUT_REPORT_INTERVAL, TASK_FOREVER, &taskReportPinStart,&runner,false);
+tsk::Task t6(INPUT_REPORT_SPLIT_INTERVAL, NUM_DIGITAL_PINS, &taskReportPin,&runner,false);
 
 void taskReadInputPin()
 {
@@ -1028,17 +1032,10 @@ void setup()
 
   config.begin();
 
-  runner.addTask(t1);
-  runner.addTask(t2);
-  runner.addTask(t3);
-  runner.addTask(t4);
-  runner.addTask(t5);
-  runner.addTask(t6);
   t1.enable();
   t2.enable();
   t3.enable();
-  t4.enable();
-  t4.delay(REQUEST_CONFIG_DELAY);
+  t4.enableDelayed(REQUEST_CONFIG_DELAY);
   t5.enable();
 }
 
