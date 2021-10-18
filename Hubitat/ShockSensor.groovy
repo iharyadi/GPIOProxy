@@ -82,7 +82,7 @@ def initialize()
     byte[] setPinMode  = [SET_PIN_MODE(),getDevicePinNumber(),INPUT()];
     byte[] getpinvalue = [GET_PIN_VALUE(),getDevicePinNumber(),0]
     byte[] setpindebounce = [SET_INPUT_PIN_DEBOUNCE(), getDevicePinNumber(),250]
-    byte[] setpindebouncemode = [SET_INPUT_PIN_DEBOUNCE_MODE(), getDevicePinNumber(),DEBOUNCE_IGNORE_LEVEL()]
+    byte[] setpindebouncemode = [SET_INPUT_PIN_DEBOUNCE_MODE(), getDevicePinNumber(),DEBOUNCE_IGNORE_LEVEL_MODE()]
     def cmd = []
     cmd += parent.sendToSerialdevice(setpindebouncemode)    
     cmd += "delay 100"
@@ -109,4 +109,5 @@ def refresh()
 {
     refreshImp()
 }
+
 
