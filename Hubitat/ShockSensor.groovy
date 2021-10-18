@@ -19,66 +19,7 @@ metadata {
     }
 }
 
-private short REPORT_PIN_CURRENT_VALUE()
-{
-    return 0x00
-}
-
-private short SET_INPUT_PIN_DEBOUNCE()
-{
-    return 0x04   
-}
-
-private short SET_INPUT_PIN_DEBOUNCE_MODE()
-{
-    return 0x08
-}
-
-private short DEBOUNCE_IGNORE_LEVEL()
-{
-    return 0x01
-}
-
-private short LOW()
-{
-    return 0;   
-}
-
-private short HIGH()
-{
-    return 1;   
-}
-
-private short INPUT()
-{
-   return 0x00;   
-}
-
-private short UNCONFIGURED()
-{
-   return 0xFF;   
-}
-
-private short SET_PIN_MODE()
-{
-    return 0x03   
-}
-
-private short GET_PIN_VALUE()
-{
-    return 0x02    
-}
-
-private short REQUEST_CONFIGURATION()
-{
-    return 0x06   
-}
-
-private short getDevicePinNumber()
-{
-    String devicePinNumber = device.getDataValue("pageNumber")
-    return (short) devicePinNumber.toInteger();
-}
+#include iharyadi.gpiolib
 
 def delayedInactiveEvent()
 {
@@ -144,13 +85,13 @@ def initialize()
     byte[] setpindebouncemode = [SET_INPUT_PIN_DEBOUNCE_MODE(), getDevicePinNumber(),DEBOUNCE_IGNORE_LEVEL()]
     def cmd = []
     cmd += parent.sendToSerialdevice(setpindebouncemode)    
-    cmd += "delay 50"
+    cmd += "delay 100"
     cmd += parent.sendToSerialdevice(setpindebounce)    
-    cmd += "delay 50"
+    cmd += "delay 100"
     cmd += parent.sendToSerialdevice(setPinMode)
-    cmd += "delay 50"
+    cmd += "delay 100"
     cmd += parent.sendToSerialdevice(getpinvalue)  
-    cmd += "delay 2000"
+    cmd += "delay 100"
     parent.sendCommandP(cmd) 
 }
 
@@ -161,16 +102,11 @@ def configure()
 
 def uninstalled() {
     unschedule(delayedInactiveEvent)
-    byte[] setPinMode = [SET_PIN_MODE(),getDevicePinNumber(),UNCONFIGURED()];
-    def cmd = []
-    cmd += parent.sendToSerialdevice(setPinMode)    
-    parent.sendCommandP(cmd) 
+    unconfiguredImp()
 }
 
 def refresh()
 {
-    byte[] getpinvalue = [GET_PIN_VALUE(),getDevicePinNumber(),0];
-    def cmd = []
-    cmd += parent.sendToSerialdevice(getpinvalue)  
-    parent.sendCommandP(cmd) 
+    refreshImp()
 }
+
